@@ -45,14 +45,12 @@ repos:
         stages:
           - pre-commit
 
-      - id: mypy
-        name: mypy
-        description: check if the changed files pass the mypy type checker
+      - id: pyrefly
+        name: pyrefly
+        description: type check with pyrefly
         language: system
-        entry: uv run mypy
+        entry: uv run pyrefly check
         types: [python]
-        stages:
-          - pre-commit
 
       - id: uv-lock
         name: uv (lock)
@@ -73,4 +71,3 @@ repos:
           - post-checkout
           - post-merge
           - post-rewrite
-

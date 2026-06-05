@@ -14,7 +14,7 @@ run = [
 [tasks.test]
 description = "Execute unit tests"
 run = [
-    "pytest --random-order-bucket=global -n auto"
+    "uv run --frozen --group test pytest --random-order-bucket=global -n auto"
 ]
 
 [tasks."lint:code"]

@@ -1,0 +1,48 @@
+[tools]
+"github:facebook/pyrefly" = "1.0"
+prek = "0.3"
+ruff = "0.15"
+uv = "0.11"
+
+[tasks.setup]
+description = "Setup the development environment"
+run = [
+    "uv sync --frozen",
+    "prek install --install-hooks",
+]
+
+[tasks."lint:code"]
+description = "Lint codebase using ruff"
+run = "ruff check src tests"
+
+[tasks."lint:format"]
+description = "Check import sorting order using ruff"
+run = """ruff format src tests --check --config 'lint.ignore=["COM812"]'"""
+
+[tasks."lint:typing"]
+description = "Static type checking using pyrefly"
+run = "pyrefly check src tests"
+
+[tasks.lint]
+description = "Run code linters"
+depends = ["lint:*"]
+run = []
+
+[tasks."format:code"]
+run = """ruff format src tests --config 'lint.ignore=["COM812"]'"""
+
+[tasks."format:imports"]
+run = "ruff check src tests --select I --fix"
+
+[tasks.format]
+description = "Run code formatters"
+depends = ["format:*"]
+run = []
+
+[tasks.bump]
+description = "Bump version"
+run = "uv run --frozen scripts/bump.py"
+
+[tasks.docs]
+description = "Run mkdocs live preview server."
+run = "uv run --frozen --group docs mkdocs serve --open"

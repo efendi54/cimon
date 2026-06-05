@@ -1,0 +1,84 @@
+default_install_hook_types = [
+    "pre-commit",
+    "commit-msg",
+    "post-checkout",
+    "post-merge",
+]
+
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+
+    [[repos.hooks]]
+    id = "check-merge-conflict"
+
+    [[repos.hooks]]
+    id = "end-of-file-fixer"
+
+    [[repos.hooks]]
+    id = "trailing-whitespace"
+    args = [
+        "--markdown-linebreak-ext=md",
+    ]
+
+[[repos]]
+repo = "local"
+
+    [[repos.hooks]]
+    id = "ruff-check"
+    name = "ruff: check"
+    entry = "ruff check src tests"
+    language = "system"
+    pass_filenames = false
+    stages = [
+        "pre-commit"
+    ]
+
+    [[repos.hooks]]
+    id = "ruff-format"
+    name = "ruff: format"
+    language = "system"
+    entry = """ruff format src tests --config 'lint.ignore=["COM812"]'"""
+    pass_filenames = false
+    stages = [
+        "pre-commit"
+    ]
+
+    [[repos.hooks]]
+    id = "ruff-sort-imports"
+    name = "ruff: sort imports"
+    language = "system"
+    entry = "ruff check src tests --fix --select I"
+    pass_filenames = false
+    stages = [
+        "pre-commit"
+    ]
+
+    [[repos.hooks]]
+    id = "pyrefly"
+    name = "pyrefly"
+    language = "system"
+    entry = "pyrefly check src test"
+    pass_filenames = false
+    stages = [
+        "pre-commit"
+    ]
+
+    [[repos.hooks]]
+    id = "uv-sync"
+    name = "uv: sync"
+    language = "system"
+    entry = "uv sync --frozen"
+    pass_filenames = false
+    stages = [
+        "post-merge",
+        "post-checkout",
+    ]
+
+    [[repos.hooks]]
+    id = "uv-lock"
+    name = "uv: lock"
+    entry = "uv lock"
+    language = "system"
+    files = '^(uv\.lock|pyproject\.toml|uv\.toml)$'
+    pass_filenames = false

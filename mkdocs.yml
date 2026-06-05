@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
+site_name: A gh wf visualization
+
+repo_name: gh-wf-visu
+# repo_url: https://github.com/<your project URI>
+
+watch:
+  - .
+
+docs_dir: .
+exclude_docs: |
+    .github/
+    .venv/
+    scripts/
+    tests/
+
+nav:
+  - Home: README.md
+  - References:
+    - API: docs/references/api.md
+
+extra:
+  version:
+    provider: mike
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github-alt
+  font:
+    text: Roboto
+    code: JetBrains Mono
+  features:
+  - navigation.indexes
+  - navigation.tabs
+  - navigation.sections
+  - navigation.tracking
+  - search.highlight
+  - search.share
+  - search.suggest
+
+  palette:
+
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default 
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+plugins:
+- search
+- same-dir
+- mkdocstrings
+  
+markdown_extensions:
+
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.escapeall:
+      hardbreak: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+

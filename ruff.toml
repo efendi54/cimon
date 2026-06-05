@@ -1,0 +1,30 @@
+line-length = 120
+indent-width = 4
+target-version = "py310"
+
+[lint]
+# enable all linter rules
+select = ["ALL"]
+ignore = [
+    "D104",     # missing docstring in public package
+    "D203",     # no blank line before class docstring
+    "D212",     # multi line summary on the first line of a docstring
+    "G004",     # f-string in logging
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.isort]
+# modules from the tests package (mocks etc.) should always be separated from
+# everything else.
+forced-separate = [
+    "tests"
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"

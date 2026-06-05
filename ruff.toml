@@ -10,10 +10,15 @@ ignore = [
     "D203",     # no blank line before class docstring
     "D212",     # multi line summary on the first line of a docstring
     "G004",     # f-string in logging
+    "S101",
 ]
 
 [lint.mccabe]
-max-complexity = 10
+max-complexity = 15
+
+[lint.pylint]
+max-args = 10
+max-branches = 15
 
 [lint.pydocstyle]
 convention = "google"

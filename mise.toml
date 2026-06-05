@@ -11,6 +11,12 @@ run = [
     "prek install --install-hooks",
 ]
 
+[tasks.test]
+description = "Execute unit tests"
+run = [
+    "pytest --random-order-bucket=global -n auto"
+]
+
 [tasks."lint:code"]
 description = "Lint codebase using ruff"
 run = "ruff check src tests"
@@ -43,6 +49,6 @@ run = []
 description = "Bump version"
 run = "uv run --frozen scripts/bump.py"
 
-[tasks.docs]
-description = "Run mkdocs live preview server."
-run = "uv run --frozen --group docs mkdocs serve --open"
+# [tasks.docs]
+# description = "Run mkdocs live preview server."
+# run = "uv run --frozen --group docs mkdocs serve --open"

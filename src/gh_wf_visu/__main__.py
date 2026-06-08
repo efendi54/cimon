@@ -62,10 +62,10 @@ def main(log_level: str) -> None:
     The value can be set via the 'WORKFLOW_PATH' environment variable.""",
 )
 @click.option(
-    "-s",
-    "--subgraphs",
+    "-d",
+    "--deep",
     is_flag=True,
-    help="""Whether to generate subgraphs for reusable workflows.""",
+    help="""If true will generate subgraphs for reusable workflows, otherwise will generate a shallow call-graph.""",
 )
 @click.option(
     "-o",
@@ -80,14 +80,14 @@ def callgraph(
     repo_name: str,
     workflow_path: str,
     *,
-    subgraphs: bool,
+    deep: bool,
     output_folder: Path,
 ) -> None:
     """Command to show a call graph of the workflow."""
     logger.debug("Using GitHub host URL: %s", host_url)
     logger.debug("Using repository name: %s", repo_name)
 
-    callgraph_mode = MermaidCallGraphMode.DEEP if subgraphs else MermaidCallGraphMode.SHALLOW
+    callgraph_mode = MermaidCallGraphMode.DEEP if deep else MermaidCallGraphMode.SHALLOW
     generate_mermaid_graph(wf_path=Path(workflow_path), out_path=output_folder, callgraph_mode=callgraph_mode)
 
 

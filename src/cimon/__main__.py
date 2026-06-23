@@ -1,7 +1,6 @@
 """
-GitHub Workflow Visualizer.
+CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff.
 
-A tool to visualize GitHub Actions workflows by generating call graphs in Mermaid syntax.
 """
 
 import logging
@@ -10,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from gh_wf_visu.call_graph import MermaidCallGraphMode, generate_mermaid_graph
+from cimon.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 
 logger = logging.getLogger(__name__)
 

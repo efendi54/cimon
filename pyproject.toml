@@ -3,9 +3,9 @@ requires = ["uv_build>=0.11.14,<0.12"]
 build-backend = "uv_build"
 
 [project]
-name = "gh-wf-visu"
+name = "cimon"
 version = "0.1.0"
-description = "A gh wf visualization"
+description = "A ci monitoring tool"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-gh-wf-visu = "gh_wf_visu.__main__:main"
+cimon = "cimon.__main__:main"
 
 [dependency-groups]
 dev = [

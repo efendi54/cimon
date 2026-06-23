@@ -166,6 +166,58 @@ wheels = [
 ]
 
 [[package]]
+name = "cimon"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "cron-descriptor" },
+    { name = "pygithub" },
+    { name = "pyyaml" },
+]
+
+[package.dev-dependencies]
+docs = [
+    { name = "mike" },
+    { name = "mkdocs-material" },
+    { name = "mkdocs-same-dir" },
+    { name = "mkdocstrings", extra = ["python"] },
+    { name = "properdocs" },
+]
+test = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-random-order" },
+    { name = "pytest-xdist" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.3.0" },
+    { name = "cron-descriptor", specifier = ">=2.0.6" },
+    { name = "pygithub", specifier = ">=2.8.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
+
+[package.metadata.requires-dev]
+dev = []
+docs = [
+    { name = "mike", specifier = "~=2.2.0" },
+    { name = "mkdocs-material", specifier = "~=9.7.0" },
+    { name = "mkdocs-same-dir", specifier = "~=0.1.0" },
+    { name = "mkdocstrings", extras = ["python"], specifier = "~=1.0.0" },
+    { name = "properdocs", specifier = "~=1.6.0" },
+]
+test = [
+    { name = "pytest", specifier = "~=9.0.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "pytest-mock", specifier = "~=3.15.0" },
+    { name = "pytest-random-order", specifier = ">=1.2.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+]
+
+[[package]]
 name = "click"
 version = "8.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -351,58 +403,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz", hash = "sha256:63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd", size = 166622, upload-time = "2025-11-12T09:56:37.75Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl", hash = "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec", size = 40708, upload-time = "2025-11-12T09:56:36.333Z" },
-]
-
-[[package]]
-name = "gh-wf-visu"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "cron-descriptor" },
-    { name = "pygithub" },
-    { name = "pyyaml" },
-]
-
-[package.dev-dependencies]
-docs = [
-    { name = "mike" },
-    { name = "mkdocs-material" },
-    { name = "mkdocs-same-dir" },
-    { name = "mkdocstrings", extra = ["python"] },
-    { name = "properdocs" },
-]
-test = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "pytest-random-order" },
-    { name = "pytest-xdist" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.3.0" },
-    { name = "cron-descriptor", specifier = ">=2.0.6" },
-    { name = "pygithub", specifier = ">=2.8.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-
-[package.metadata.requires-dev]
-dev = []
-docs = [
-    { name = "mike", specifier = "~=2.2.0" },
-    { name = "mkdocs-material", specifier = "~=9.7.0" },
-    { name = "mkdocs-same-dir", specifier = "~=0.1.0" },
-    { name = "mkdocstrings", extras = ["python"], specifier = "~=1.0.0" },
-    { name = "properdocs", specifier = "~=1.6.0" },
-]
-test = [
-    { name = "pytest", specifier = "~=9.0.0" },
-    { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "pytest-mock", specifier = "~=3.15.0" },
-    { name = "pytest-random-order", specifier = ">=1.2.0" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
 
 [[package]]

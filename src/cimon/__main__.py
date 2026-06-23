@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from cimon.call_graph import MermaidCallGraphMode, generate_mermaid_graph
+from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 
 logger = logging.getLogger(__name__)
 

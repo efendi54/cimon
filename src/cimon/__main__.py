@@ -89,9 +89,9 @@ def callgraph(
     callgraph_mode = MermaidCallGraphMode.DEEP if deep else MermaidCallGraphMode.SHALLOW
     generate_mermaid_graph(wf_path=Path(workflow_path), out_path=output_folder, callgraph_mode=callgraph_mode)
 
-
+@main.command()
 def jobmon() -> None:
-    """Command to show a call graph of the workflow."""
+    """Showing actively running jobs in the CI."""
     logger.debug("Job monitoring is not yet implemented.")
     active_jobs()
 

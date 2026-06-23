@@ -1,4 +1,4 @@
-# tools-gh-wf-visu
+# cimon
 
 Small CLI tool for generating markdown content towards providing graphical representation of github action workflow call graphs as mermaid flow chart diagrams.
 
@@ -8,7 +8,7 @@ Small CLI tool for generating markdown content towards providing graphical repre
 An example usage for generating a (shallow) callgraph for a github actions workflow residing in a certain directory:
 
 ```bash
-uv run gh-wf-visu callgraph -w ~/app-adas-src/.github/workflows/pr.yml
+uv run cimon callgraph -w ~/app-adas-src/.github/workflows/pr.yml
 ```
 
 Example output:
@@ -65,7 +65,7 @@ class used____github_workflows_reusable_bazel_build_yml,used____github_workflows
 
 If subsequent nested and re-used workflows shall be shown as subgraphs provide the `-d` option:
 ```bash
-uv run gh-wf-visu callgraph -w ~/app-adas-src/.github/workflows/pr.yml -d
+uv run cimon callgraph -w ~/app-adas-src/.github/workflows/pr.yml -d
 ```
 
 An example graphical representation could be like:

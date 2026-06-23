@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
-
+from cimon.monitoring.active_jobs import active_jobs
 logger = logging.getLogger(__name__)
 
 
@@ -89,6 +89,11 @@ def callgraph(
     callgraph_mode = MermaidCallGraphMode.DEEP if deep else MermaidCallGraphMode.SHALLOW
     generate_mermaid_graph(wf_path=Path(workflow_path), out_path=output_folder, callgraph_mode=callgraph_mode)
 
+
+def jobmon() -> None:
+    """Command to show a call graph of the workflow."""
+    logger.debug("Job monitoring is not yet implemented.")
+    active_jobs()
 
 if __name__ == "__main__":
     main()

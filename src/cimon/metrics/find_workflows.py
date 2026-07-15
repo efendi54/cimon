@@ -5,14 +5,6 @@
 # ]
 # ///
 
-# following environment variables must be set:
-# - GH_TOKEN or GITHUB_TOKEN: GitHub personal access token
-# - GH_HOST: GitHub host (default: github.com)
-# additionally the following environment variables can be set:
-# - GH_API_BASE_URL: GitHub API base URL (default: https://github.com/api/v3)
-# in order to have the requests library use system certificates, you can set the REQUESTS_CA_BUNDLE environment variable to the path of the certificate bundle file. For example:
-# export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
 from __future__ import annotations
 
 import argparse
@@ -20,6 +12,7 @@ import datetime as dt
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 
@@ -38,28 +31,42 @@ def get_token():
         os.getenv("GH_TOKEN")
         or os.getenv("GITHUB_TOKEN")
     )
+
     if not token:
-        raise RuntimeError("GH_TOKEN or GITHUB_TOKEN must be set")
+        raise RuntimeError(
+            "GH_TOKEN or GITHUB_TOKEN must be set"
+        )
+
     return token
+
 
 
 def get_api_base_url():
 
     host = os.getenv("GH_HOST")
+
     if not host:
-        raise RuntimeError("GH_HOST must be set")
+        raise RuntimeError(
+            "GH_HOST must be set"
+        )
+
     return f"https://{host}/api/v3"
+
+
 
 def create_session(token):
 
     session = requests.Session()
+
     session.headers.update(
         {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
         }
     )
+
     return session
+
 
 
 def api_get(
@@ -71,24 +78,39 @@ def api_get(
 ):
 
     for attempt in range(retries):
+
         try:
+
             response = session.get(
                 url,
                 params=params,
                 timeout=30,
             )
+
         except requests.RequestException:
+
             if attempt == retries - 1:
                 raise
-            time.sleep(2 ** attempt)
+
+            time.sleep(
+                2 ** attempt
+            )
+
             continue
+
+
 
         remaining = response.headers.get(
             "X-RateLimit-Remaining"
         )
 
         if remaining and int(remaining) < 100:
-            print(f"WARNING: API quota low: {remaining}")
+
+            print(
+                f"WARNING: API quota low: {remaining}"
+            )
+
+
 
         if response.status_code in (
             429,
@@ -97,10 +119,15 @@ def api_get(
             503,
             504,
         ):
+
             if attempt == retries - 1:
                 response.raise_for_status()
 
-            retry_after = response.headers.get("Retry-After")
+
+            retry_after = response.headers.get(
+                "Retry-After"
+            )
+
 
             delay = (
                 int(retry_after)
@@ -108,17 +135,28 @@ def api_get(
                 else 2 ** attempt
             )
 
-            print(f"Retry {response.status_code} in {delay}s")
+
+            print(
+                f"Retry {response.status_code} in {delay}s"
+            )
+
 
             time.sleep(delay)
+
             continue
 
+
+
         response.raise_for_status()
+
         return response
+
+
 
     raise RuntimeError(
         "GitHub API failed"
     )
+
 
 
 def print_quota(
@@ -130,17 +168,31 @@ def print_quota(
         session,
         f"{base_url}/rate_limit",
     ).json()
+
+
     core = data["resources"]["core"]
+
+
     reset = dt.datetime.fromtimestamp(
         core["reset"],
         tz=dt.timezone.utc,
     )
 
+
     print("GitHub API quota:")
-    print(f"  Limit:     {core['limit']}")
-    print(f"  Used:      {core['used']}")
-    print(f"  Remaining: {core['remaining']}")
-    print(f"  Reset:     {reset}")
+    print(
+        f"  Limit:     {core['limit']}"
+    )
+    print(
+        f"  Used:      {core['used']}"
+    )
+    print(
+        f"  Remaining: {core['remaining']}"
+    )
+    print(
+        f"  Reset:     {reset}"
+    )
+
 
 
 def workflow_info(
@@ -162,6 +214,7 @@ def workflow_info(
     ).json()
 
 
+
 def iter_runs(
     session,
     base_url,
@@ -173,10 +226,15 @@ def iter_runs(
     workflow_status=None,
     max_pages=None,
 ):
+
     page = 1
+
+
     while True:
+
         if max_pages and page > max_pages:
             break
+
 
         response = api_get(
             session,
@@ -195,14 +253,29 @@ def iter_runs(
             },
         )
 
+
         runs = response.json()["workflow_runs"]
+
+
         if not runs:
             break
 
+
+
         for run in runs:
-            if workflow_status and run["conclusion"] != workflow_status and run["conclusion"] != workflow_status:
+
+            if (
+                workflow_status
+                and run["conclusion"]
+                != workflow_status
+            ):
                 continue
+
+
             yield run
+
+
+
         page += 1
 
 def iter_jobs(
@@ -212,15 +285,22 @@ def iter_jobs(
     repo,
     run_id,
 ):
+
     with JOB_CACHE_LOCK:
         cached = JOB_CACHE.get(run_id)
+
 
     if cached is not None:
         yield from cached
         return
 
+
+
     jobs = []
+
     page = 1
+
+
     while True:
 
         response = api_get(
@@ -236,15 +316,25 @@ def iter_jobs(
                 "page": page,
             },
         )
+
+
         page_jobs = response.json()["jobs"]
+
+
         if not page_jobs:
             break
 
+
         jobs.extend(page_jobs)
+
         page += 1
+
+
 
     with JOB_CACHE_LOCK:
         JOB_CACHE[run_id] = jobs
+
+
 
     yield from jobs
 
@@ -283,11 +373,12 @@ def find_matching_job(
         return job
 
 
+
     return None
 
 
 
-def calculate_duration(job):
+def calculate_job_duration_in_seconds(job):
 
     if (
         not job.get("started_at")
@@ -296,10 +387,12 @@ def calculate_duration(job):
         return None
 
 
+
     start = dt.datetime.strptime(
         job["started_at"],
         "%Y-%m-%dT%H:%M:%SZ",
     )
+
 
     end = dt.datetime.strptime(
         job["completed_at"],
@@ -307,8 +400,11 @@ def calculate_duration(job):
     )
 
 
+
     return int(
-        (end - start).total_seconds()
+        (
+            end - start
+        ).total_seconds()
     )
 
 
@@ -321,6 +417,80 @@ def now_iso():
 
 
 
+def load_cache(path):
+
+    if not os.path.exists(path):
+        return []
+
+
+
+    with open(
+        path,
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        data = json.load(f)
+
+
+
+    if not isinstance(data, list):
+
+        raise RuntimeError(
+            f"{path} must contain JSON list"
+        )
+
+
+    return data
+
+
+
+def save_cache(
+    path,
+    data,
+):
+
+    directory = os.path.dirname(
+        os.path.abspath(path)
+    )
+
+
+    fd, tmp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".cache_",
+        suffix=".json",
+    )
+
+
+    try:
+
+        with os.fdopen(
+            fd,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            json.dump(
+                data,
+                f,
+                indent=2,
+            )
+
+
+        os.replace(
+            tmp_path,
+            path,
+        )
+
+
+    finally:
+
+        if os.path.exists(tmp_path):
+
+            os.unlink(tmp_path)
+
+
+
 def process_job_run(
     session,
     base_url,
@@ -330,7 +500,28 @@ def process_job_run(
     workflow,
     job_name,
     job_status,
+    cached_runs,
 ):
+
+    run_id = str(
+        run["id"]
+    )
+
+
+    #
+    # Wichtig:
+    # Cache wird geprüft BEVOR
+    # die Jobs API aufgerufen wird.
+    #
+    if run_id in cached_runs:
+
+        print(
+            f"Using cached run {run_id}"
+        )
+
+        return None
+
+
 
     job = find_matching_job(
         session,
@@ -343,8 +534,11 @@ def process_job_run(
     )
 
 
+
     if job is None:
+
         return None
+
 
 
     return {
@@ -361,7 +555,7 @@ def process_job_run(
         "job_name": job["name"],
         "html_url": job["html_url"],
 
-        "duration": calculate_duration(job),
+        "duration_sec": calculate_job_duration_in_seconds(job),
 
         "workflow_conclusion": (
             run["conclusion"]
@@ -371,36 +565,10 @@ def process_job_run(
             job["conclusion"]
         ),
 
+        "created_at": run["created_at"],
+
         "added_at": now_iso(),
     }
-
-
-
-def job_cache_key(run_id, job_name):
-    return f"{run_id}:{job_name}"
-
-
-def workflow_cache_key(run_id):
-    return str(run_id)
-
-
-def load_cache(path):
-
-    if not os.path.exists(path):
-        return []
-    
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, list):
-        raise RuntimeError(f"{path} must contain JSON list")
-    
-    return data
-
-
-def save_cache(path, data):
-    with open(path, "w", encoding="utf-8" ) as f:
-        json.dump( data, f, indent=2 )
 
 def main():
 
@@ -410,6 +578,7 @@ def main():
             "or workflow jobs."
         )
     )
+
 
     parser.add_argument(
         "--owner",
@@ -431,7 +600,7 @@ def main():
         "--job",
         default=None,
         help=(
-            "Optional job name. "
+            "Optional job name filter. "
             "If omitted workflow runs are collected."
         ),
     )
@@ -472,9 +641,6 @@ def main():
         "--workers",
         type=int,
         default=5,
-        help=(
-            "Number of parallel job API requests."
-        ),
     )
 
     parser.add_argument(
@@ -496,21 +662,33 @@ def main():
     parser.add_argument(
         "--output-file",
         default=None,
-        help=(
-            "JSON output file. "
-            "Overrides default filename."
-        ),
     )
+
 
     args = parser.parse_args()
 
+
+
     token = get_token()
+
     base_url = get_api_base_url()
-    session = create_session(token)
+
+    session = create_session(
+        token
+    )
+
+
 
     if args.quota:
-        print_quota(session, base_url)
+
+        print_quota(
+            session,
+            base_url,
+        )
+
         return
+
+
 
     workflow = workflow_info(
         session,
@@ -521,12 +699,20 @@ def main():
     )
 
 
-    print(f"Workflow: {workflow['name']}")
+    print(
+        f"Workflow: {workflow['name']}"
+    )
 
-    print(f"Workflow ID: {workflow['id']}")
+    print(
+        f"Workflow ID: {workflow['id']}"
+    )
 
 
-    output_dir = os.path.abspath(args.output_dir)
+
+    output_dir = os.path.abspath(
+        args.output_dir
+    )
+
 
     os.makedirs(
         output_dir,
@@ -534,9 +720,15 @@ def main():
     )
 
 
+
     if args.output_file:
-        output_file = os.path.abspath(args.output_file)
+
+        output_file = os.path.abspath(
+            args.output_file
+        )
+
     else:
+
         output_file = os.path.join(
             output_dir,
             (
@@ -546,66 +738,70 @@ def main():
             ),
         )
 
-    cached_results = load_cache(output_file)
 
-    if args.job:
 
-        cached_keys = {
-            job_cache_key(
-                item["run_id"],
-                item["job_name"],
-            )
-            for item in cached_results
-            if (
-                "run_id" in item
-                and "job_name" in item
-            )
-        }
+    cached_results = load_cache(
+        output_file
+    )
 
-    else:
 
-        cached_keys = {
-            workflow_cache_key(
-                item["run_id"]
-            )
-            for item in cached_results
-            if "run_id" in item
-        }
 
-    print(f"Cached entries: {len(cached_results)}")
-    runs_to_process = []
+    #
+    # Cache Index:
+    #
+    # {
+    #   "123456789": {
+    #       kompletter Job-Eintrag
+    #   }
+    # }
+    #
+    cached_runs = {
+        str(item["run_id"]): item
+        for item in cached_results
+        if "run_id" in item
+    }
 
-    for run in iter_runs(
-        session,
-        base_url,
-        args.owner,
-        args.repo,
-        workflow["id"],
-        args.from_date,
-        args.to_date,
-        args.workflow_status,
-        args.max_pages,
-    ):
 
-        if args.job:
-            key = job_cache_key(run["id"],args.job)
-        else:
-            key = workflow_cache_key(run["id"])
 
-        if key in cached_keys:
-            print(f"Skipping cached {key}")
-            continue
+    print(
+        f"Cached entries: {len(cached_results)}"
+    )
 
-        runs_to_process.append(run)
 
-    print(f"Runs to process: {len(runs_to_process)}")
+
+    runs = list(
+        iter_runs(
+            session,
+            base_url,
+            args.owner,
+            args.repo,
+            workflow["id"],
+            args.from_date,
+            args.to_date,
+            args.workflow_status,
+            args.max_pages,
+        )
+    )
+
+
+
+    print(
+        f"Runs found: {len(runs)}"
+    )
+
+
 
     new_results = []
+
+
+
     if args.job:
+
 
         with ThreadPoolExecutor(
             max_workers=args.workers
         ) as executor:
+
 
             futures = [
                 executor.submit(
@@ -618,22 +814,53 @@ def main():
                     workflow,
                     args.job,
                     args.job_status,
+                    cached_runs,
                 )
-                for run in runs_to_process
+                for run in runs
             ]
 
-            for future in as_completed(futures):
+
+
+            for future in as_completed(
+                futures
+            ):
 
                 result = future.result()
+
+
                 if result:
 
                     new_results.append(
                         result
                     )
 
-                    print(f"Adding {result['html_url']}")
+
+                    print(
+                        f"Adding {result['html_url']}"
+                    )
+
+
+
     else:
-        for run in runs_to_process:
+
+
+        for run in runs:
+
+            run_id = str(
+                run["id"]
+            )
+
+
+            if run_id in cached_runs:
+
+                print(
+                    f"Skipping cached workflow {run_id}"
+                )
+
+                continue
+
+
+
             new_results.append(
                 {
                     "run_id": run["id"],
@@ -650,26 +877,61 @@ def main():
                     ),
 
                     "created_at": run["created_at"],
+
                     "checked_at": now_iso(),
                 }
             )
 
-    combined_results = (
-        cached_results
-        + new_results
+
+
+    #
+    # Merge ohne Duplikate
+    #
+    combined = {
+        str(item["run_id"]): item
+        for item in (
+            cached_results
+            + new_results
+        )
+    }
+
+
+
+    combined_results = list(
+        combined.values()
     )
 
-    save_cache(output_file, combined_results)
+
+
+    save_cache(
+        output_file,
+        combined_results,
+    )
+
+
 
     print()
-    print(f"New entries: {len(new_results)}")
-    print(f"Total entries: {len(combined_results)}")
-    print(f"Output: {output_file}")
+
+    print(
+        f"New entries: {len(new_results)}"
+    )
+
+    print(
+        f"Total entries: {len(combined_results)}"
+    )
+
+    print(
+        f"Output: {output_file}"
+    )
+
 
 
 if __name__ == "__main__":
 
     try:
+
         main()
+
     except KeyboardInterrupt:
+
         sys.exit(130)

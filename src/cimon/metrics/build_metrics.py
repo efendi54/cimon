@@ -441,15 +441,54 @@ def main(
     return 0
 
 
+def process_input(
+    input_arg: str,
+    output_root: Path,
+) -> int:
+    if WORKFLOW_URL_RE.match(input_arg):
+        return main(input_arg, output_root)
+
+    input_path = Path(input_arg)
+
+    if not input_path.is_file():
+        raise ValueError(
+            f"'{input_arg}' is neither a workflow URL nor a JSON file."
+        )
+
+    with open(input_path, encoding="utf-8") as f:
+        entries = json.load(f)
+
+    if not isinstance(entries, list):
+        raise ValueError("JSON must contain an array.")
+
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Entry {i} is not an object.")
+
+        workflow_url = entry.get("html_url")
+
+        if not workflow_url:
+            raise ValueError(
+                f"Entry {i} has no 'html_url' property."
+            )
+
+        print("=" * 80)
+        print(f"Processing {workflow_url}")
+        print("=" * 80)
+
+        main(workflow_url, output_root)
+
+    return 0
+
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         print(
             f"Usage: {sys.argv[0]} "
-            "<workflow-job-url> [output-dir]"
+            "<workflow-job-url | json-file> [output-dir]"
         )
         sys.exit(1)
 
-    workflow_url = sys.argv[1]
+    input_arg = sys.argv[1]
 
     out = (
         Path(sys.argv[2])
@@ -457,4 +496,4 @@ if __name__ == "__main__":
         else Path("/tmp")
     )
 
-    sys.exit(main(workflow_url, out))
+    sys.exit(process_input(input_arg, out))

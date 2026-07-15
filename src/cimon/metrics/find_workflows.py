@@ -13,16 +13,12 @@ import json
 import os
 import sys
 import tempfile
-import threading
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-
-JOB_CACHE = {}
-JOB_CACHE_LOCK = threading.Lock()
 
 
 def get_token():
@@ -99,17 +95,14 @@ def api_get(
             continue
 
 
-
         remaining = response.headers.get(
             "X-RateLimit-Remaining"
         )
 
         if remaining and int(remaining) < 100:
-
             print(
                 f"WARNING: API quota low: {remaining}"
             )
-
 
 
         if response.status_code in (
@@ -128,29 +121,24 @@ def api_get(
                 "Retry-After"
             )
 
-
             delay = (
                 int(retry_after)
                 if retry_after
                 else 2 ** attempt
             )
 
-
             print(
                 f"Retry {response.status_code} in {delay}s"
             )
-
 
             time.sleep(delay)
 
             continue
 
 
-
         response.raise_for_status()
 
         return response
-
 
 
     raise RuntimeError(
@@ -180,18 +168,10 @@ def print_quota(
 
 
     print("GitHub API quota:")
-    print(
-        f"  Limit:     {core['limit']}"
-    )
-    print(
-        f"  Used:      {core['used']}"
-    )
-    print(
-        f"  Remaining: {core['remaining']}"
-    )
-    print(
-        f"  Reset:     {reset}"
-    )
+    print(f"  Limit:     {core['limit']}")
+    print(f"  Used:      {core['used']}")
+    print(f"  Remaining: {core['remaining']}")
+    print(f"  Reset:     {reset}")
 
 
 
@@ -236,6 +216,16 @@ def iter_runs(
             break
 
 
+        params = {
+            "created": f"{from_date}..{to_date}",
+            "per_page": 100,
+            "page": page,
+        }
+
+        if workflow_status:
+            params["status"] = workflow_status
+
+
         response = api_get(
             session,
             (
@@ -244,37 +234,16 @@ def iter_runs(
                 f"/actions/workflows/"
                 f"{workflow_id}/runs"
             ),
-            params={
-                "created": (
-                    f"{from_date}..{to_date}"
-                ),
-                "per_page": 100,
-                "page": page,
-            },
+            params=params,
         )
 
-
         runs = response.json()["workflow_runs"]
-
 
         if not runs:
             break
 
-
-
         for run in runs:
-
-            if (
-                workflow_status
-                and run["conclusion"]
-                != workflow_status
-            ):
-                continue
-
-
             yield run
-
-
 
         page += 1
 
@@ -285,16 +254,6 @@ def iter_jobs(
     repo,
     run_id,
 ):
-
-    with JOB_CACHE_LOCK:
-        cached = JOB_CACHE.get(run_id)
-
-
-    if cached is not None:
-        yield from cached
-        return
-
-
 
     jobs = []
 
@@ -328,12 +287,6 @@ def iter_jobs(
         jobs.extend(page_jobs)
 
         page += 1
-
-
-
-    with JOB_CACHE_LOCK:
-        JOB_CACHE[run_id] = jobs
-
 
 
     yield from jobs
@@ -373,7 +326,6 @@ def find_matching_job(
         return job
 
 
-
     return None
 
 
@@ -387,7 +339,6 @@ def calculate_job_duration_in_seconds(job):
         return None
 
 
-
     start = dt.datetime.strptime(
         job["started_at"],
         "%Y-%m-%dT%H:%M:%SZ",
@@ -398,7 +349,6 @@ def calculate_job_duration_in_seconds(job):
         job["completed_at"],
         "%Y-%m-%dT%H:%M:%SZ",
     )
-
 
 
     return int(
@@ -421,7 +371,6 @@ def load_cache(path):
 
     if not os.path.exists(path):
         return []
-
 
 
     with open(
@@ -486,7 +435,6 @@ def save_cache(
     finally:
 
         if os.path.exists(tmp_path):
-
             os.unlink(tmp_path)
 
 
@@ -500,29 +448,7 @@ def process_job_run(
     workflow,
     job_name,
     job_status,
-    cached_runs,
 ):
-
-    run_id = str(
-        run["id"]
-    )
-
-
-    #
-    # Wichtig:
-    # Cache wird geprüft BEVOR
-    # die Jobs API aufgerufen wird.
-    #
-    if run_id in cached_runs:
-
-        print(
-            f"Using cached run {run_id}"
-        )
-
-        return None
-
-
-
     job = find_matching_job(
         session,
         base_url,
@@ -534,41 +460,34 @@ def process_job_run(
     )
 
 
-
     if job is None:
-
         return None
-
-
 
     return {
         "run_id": run["id"],
         "run_number": run["run_number"],
-
-        "workflow_id": workflow["id"],
-        "workflow_name": workflow["name"],
-        "workflow_file": workflow["path"],
-
+        "workflow": {
+            "id": workflow["id"],
+            "name": workflow["name"],
+            "file": workflow["path"],
+        },
         "workflow_run_url": run["html_url"],
-
-        "job_id": job["id"],
-        "job_name": job["name"],
-        "html_url": job["html_url"],
-
-        "duration_sec": calculate_job_duration_in_seconds(job),
-
-        "workflow_conclusion": (
-            run["conclusion"]
-        ),
-
-        "job_conclusion": (
-            job["conclusion"]
-        ),
-
+        "workflow_status": run["status"],
         "created_at": run["created_at"],
 
-        "added_at": now_iso(),
+        "job": {
+            "id": job["id"],
+            "name": job["name"],
+            "html_url": job["html_url"],
+            "duration_sec": (
+                calculate_job_duration_in_seconds(job)
+            ),
+            "status": job["status"],
+            "conclusion": job["conclusion"],
+        },
+        "cached_at": now_iso(),
     }
+
 
 def main():
 
@@ -618,12 +537,12 @@ def main():
     parser.add_argument(
         "--workflow-status",
         choices=[
-            "success",
-            "failure",
-            "cancelled",
-            "skipped",
+            "completed",
+            "in_progress",
+            "queued",
+            "waiting",
         ],
-        default=None,
+        default="completed",
     )
 
     parser.add_argument(
@@ -750,9 +669,7 @@ def main():
     # Cache Index:
     #
     # {
-    #   "123456789": {
-    #       kompletter Job-Eintrag
-    #   }
+    #     "123456789": {...workflow result...}
     # }
     #
     cached_runs = {
@@ -764,7 +681,7 @@ def main():
 
 
     print(
-        f"Cached entries: {len(cached_results)}"
+        f"Cached workflow runs: {len(cached_runs)}"
     )
 
 
@@ -786,7 +703,7 @@ def main():
 
 
     print(
-        f"Runs found: {len(runs)}"
+        f"Workflow runs found: {len(runs)}"
     )
 
 
@@ -836,7 +753,7 @@ def main():
 
 
                     print(
-                        f"Adding {result['html_url']}"
+                        f"Adding {result['workflow_run_url']}"
                     )
 
 
@@ -851,10 +768,16 @@ def main():
             )
 
 
+            if run["status"] != "completed":
+
+                continue
+
+
+
             if run_id in cached_runs:
 
                 print(
-                    f"Skipping cached workflow {run_id}"
+                    f"Using cached workflow run {run_id}"
                 )
 
                 continue
@@ -864,11 +787,14 @@ def main():
             new_results.append(
                 {
                     "run_id": run["id"],
+
                     "run_number": run["run_number"],
 
-                    "workflow_id": workflow["id"],
-                    "workflow_name": workflow["name"],
-                    "workflow_file": workflow["path"],
+                    "workflow": {
+                        "id": workflow["id"],
+                        "name": workflow["name"],
+                        "file": workflow["path"],
+                    },
 
                     "workflow_run_url": run["html_url"],
 
@@ -878,14 +804,15 @@ def main():
 
                     "created_at": run["created_at"],
 
-                    "checked_at": now_iso(),
+                    "cached_at": now_iso(),
                 }
             )
 
 
 
     #
-    # Merge ohne Duplikate
+    # Merge:
+    # run_id ist eindeutig
     #
     combined = {
         str(item["run_id"]): item
@@ -913,11 +840,11 @@ def main():
     print()
 
     print(
-        f"New entries: {len(new_results)}"
+        f"New workflow runs: {len(new_results)}"
     )
 
     print(
-        f"Total entries: {len(combined_results)}"
+        f"Total cached workflow runs: {len(combined_results)}"
     )
 
     print(

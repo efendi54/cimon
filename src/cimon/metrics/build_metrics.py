@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -206,6 +207,41 @@ def download_build_profiles_if_exists(
     print(f"Downloaded artifact to {target}")
 
 
+def get_bazel_targets_argument(command_line: str) -> str:
+    args = shlex.split(command_line)
+
+    try:
+        build_index = args.index("build")
+    except ValueError:
+        raise ValueError("No 'bazel build' command found.")
+
+    args = args[build_index + 1:]
+
+    targets = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+
+        # --target_pattern_file=<file>
+        if arg.startswith("--target_pattern_file="):
+            return arg.split("=", 1)[1]
+
+        # --target_pattern_file <file>
+        if arg == "--target_pattern_file":
+            if i + 1 >= len(args):
+                raise ValueError("--target_pattern_file specified without filename.")
+            return args[i + 1]
+
+        # Bazel target
+        if arg.startswith("//") or arg.startswith("@"):
+            targets.append(arg)
+
+        i += 1
+
+    return " ".join(targets)
+
+
 def parse_log(logfile: Path) -> list[dict[str, Any]]:
     builds: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -225,6 +261,8 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                     "start_ts": parse_ts(bm.group("ts")).isoformat(),
                     "build_line": line.strip(),
                 }
+                targets = get_bazel_targets_argument(line)
+                current["targets"] = targets
                 continue
 
             im = INFO_RE.search(line)
@@ -267,14 +305,15 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
 
 def generate_md_table_entries(
     builds: list[dict[str, Any]],
-    workflow_url: str,
+    job_info: dict[str, Any],
 ) -> str:
     md = [
-        "# Bazel Build Summary",
-        workflow_url,
+        f"# {job_info['job-name']}\n",
+        f'**URL:** <{job_info["job-html-url"]}>\n',
+        f'**Duration:** {fmt(job_info["duration_sec"])}\n',
         "",
-        "| Build / INFO | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Target(s) | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     for b in builds:
@@ -303,7 +342,7 @@ def generate_md_table_entries(
         )
 
         md.append(
-            f"| {cell} "
+            f"| {b['targets']} "
             f"| {fmt(duration)} "
             f"| **{rate:.1f}%** "
             f"| {c['action']} "
@@ -312,7 +351,8 @@ def generate_md_table_entries(
             f"| {c['local']} "
             f"| {c['sandbox']} "
             f"| {hits} "
-            f"| {total} |"
+            f"| {total} "
+            f"| {cell} |"
         )
 
     return "\n".join(md)
@@ -357,6 +397,7 @@ def main(
         info["repo"],
         info["job_id"],
     )
+    job_info["job-html-url"] = workflow_url
 
     build_metrics = {
         "job-html-url": workflow_url,
@@ -378,11 +419,8 @@ def main(
 
     with open(md_file, "w", encoding="utf-8") as f:
         f.write(
-            generate_md_table_entries(
-                builds,
-                workflow_url,
+            generate_md_table_entries(builds, job_info)
             )
-        )
 
     download_build_profiles_if_exists(
         info["host"],

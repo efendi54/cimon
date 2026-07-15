@@ -45,12 +45,10 @@ def get_token():
 
 def get_api_base_url():
 
-    host = os.getenv(
-        "GH_HOST",
-        "github.com",
-    )
+    host = os.getenv("GH_HOST")
+    if not host:
+        raise RuntimeError("GH_HOST must be set")
     return f"https://{host}/api/v3"
-
 
 def create_session(token):
 

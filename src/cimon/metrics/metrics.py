@@ -388,23 +388,62 @@ def main():
         )
     )
 
-    parser.add_argument("--owner", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--workflow", required=True, help="Workflow filename")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
 
-    parser.add_argument(
-        "--job",
-        default=None,
+    # ------------------------------------------------------------------
+    # quota
+    # ------------------------------------------------------------------
+
+    quota_parser = subparsers.add_parser(
+        "quota",
+        help="Show the GitHub API quota.",
+    )
+
+    # ------------------------------------------------------------------
+    # collect
+    # ------------------------------------------------------------------
+    today = dt.date.today().isoformat()
+
+    collect_runs_parser = subparsers.add_parser(
+        "runs",
+        help="Collect GitHub Actions workflow runs or workflow jobs.",
+    )
+
+    collect_runs_parser.add_argument(
+        "--owner", 
+        default="CARIAD", 
+        help="Repository owner"
+        )
+    collect_runs_parser.add_argument(
+        "--repo", 
+        default="app-adas-src", 
+        help="Repository name"
+    )
+    collect_runs_parser.add_argument(
+        "--workflow", 
+        help="Workflow filename (e.g. pr.yml)", 
+        required=True
+    )
+    collect_runs_parser.add_argument("--job",  default=None,
         help=(
             "Optional job name filter. "
             "If omitted workflow runs are collected."
         ),
     )
-
-    parser.add_argument("--from-date", required=True)
-    parser.add_argument("--to-date", required=True)
-
-    parser.add_argument(
+    collect_runs_parser.add_argument(
+        "--from-date", 
+        default=today, 
+        help="Relevant start date (YYYY-MM-DD)"
+    )
+    collect_runs_parser.add_argument(
+        "--to-date", 
+        default=today, 
+        help="Relevant end date (YYYY-MM-DD)"
+    )
+    collect_runs_parser.add_argument(
         "--workflow-status",
         choices=[
             "completed",
@@ -414,8 +453,7 @@ def main():
         ],
         default="completed",
     )
-
-    parser.add_argument(
+    collect_runs_parser.add_argument(
         "--job-status",
         choices=[
             "success",
@@ -425,12 +463,17 @@ def main():
         ],
         default="success",
     )
-
-    parser.add_argument("--workers", type=int, default=5)
-    parser.add_argument("--max-pages", type=int, default=None)
-    parser.add_argument("--quota", action="store_true")
-    parser.add_argument("--output-dir", default=".")
-    parser.add_argument("--output-file", default=None)
+    collect_runs_parser.add_argument("--workers", type=int, default=5, help="Number of concurrent worker threads for job processing")
+    collect_runs_parser.add_argument("--max-pages", type=int, default=None, help="Maximum number of pages to fetch for workflow runs")
+    collect_runs_parser.add_argument("--output-dir", default=".", help="Directory to save output files")
+    collect_runs_parser.add_argument(
+        "--output-file", 
+        default=None, 
+        help=(
+            "Output file name (into which results will be saved). "
+            "If not provided, a default name will be used based on whether jobs or workflows are collected."
+        )
+    )
 
     args = parser.parse_args()
 
@@ -438,7 +481,7 @@ def main():
     base_url = get_api_base_url()
     session = create_session(token)
 
-    if args.quota:
+    if args.command == "quota":
         print_quota(session, base_url)
         return
 
@@ -562,6 +605,7 @@ def main():
     print(f"New workflow runs: {len(new_results)}")
     print(f"Total cached workflow runs: {len(combined_results)}")
     print(f"Output: {output_file}")
+
 
 
 if __name__ == "__main__":

@@ -422,13 +422,13 @@ def main(
             generate_md_table_entries(builds, job_info)
             )
 
-    download_build_profiles_if_exists(
-        info["host"],
-        info["owner"],
-        info["repo"],
-        info["run_id"],
-        output_dir,
-    )
+    # download_build_profiles_if_exists(
+    #     info["host"],
+    #     info["owner"],
+    #     info["repo"],
+    #     info["run_id"],
+    #     output_dir,
+    # )
 
     print("\n====================")
     print("OUTPUT")
@@ -461,16 +461,13 @@ def process_input(
     if not isinstance(entries, list):
         raise ValueError("JSON must contain an array.")
 
-    for i, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            raise ValueError(f"Entry {i} is not an object.")
+    all_job_run_urls = [info.get("job", {}).get("html_url") for info in entries if isinstance(info, dict) and "job" in info and isinstance(info["job"], dict) and "html_url" in info["job"]]
 
-        workflow_url = entry.get("html_url")
+    for job_run_url in all_job_run_urls:
+        if not isinstance(job_run_url, str):
+            raise ValueError(f"Job run URL {job_run_url} is not a string.")
 
-        if not workflow_url:
-            raise ValueError(
-                f"Entry {i} has no 'html_url' property."
-            )
+        workflow_url = job_run_url
 
         print("=" * 80)
         print(f"Processing {workflow_url}")
@@ -484,7 +481,7 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         print(
             f"Usage: {sys.argv[0]} "
-            "<workflow-job-url | json-file> [output-dir]"
+            "<job-run-url | json-file> [output-dir]"
         )
         sys.exit(1)
 

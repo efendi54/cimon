@@ -283,10 +283,7 @@ def find_matching_job(
         if job_name not in job["name"]:
             continue
 
-        if (
-            job_status
-            and job["conclusion"] != job_status
-        ):
+        if (job_status != "any" and job["conclusion"] != job_status):
             continue
 
         return job
@@ -551,8 +548,9 @@ def main():
             "failure",
             "cancelled",
             "skipped",
+            "any"
         ],
-        default="success",
+        default="any",
     )
 
     collect_runs_parser.add_argument(
@@ -639,19 +637,6 @@ def main():
     }
 
     print(f"Cached workflow runs: {len(cached_runs)}")
-
-    cached_matching_runs = {
-        run_id: run
-        for run_id, run in cached_runs.items()
-        if (
-            (args.workflow_status == "any" or (run.get("workflow_status") == args.workflow_status))
-            and 
-            (args.workflow_conclusion == "any" or (run.get("workflow_conclusion") == args.workflow_conclusion))
-        )
-    }
-
-    print(f"Cached matching workflow runs: {len(cached_matching_runs)}")
-
     runs = list(
         iter_runs(
             session,

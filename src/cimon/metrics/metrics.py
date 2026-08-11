@@ -21,15 +21,10 @@ import requests
 
 
 def get_token():
-    token = (
-        os.getenv("GH_TOKEN")
-        or os.getenv("GITHUB_TOKEN")
-    )
+    token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
 
     if not token:
-        raise RuntimeError(
-            "GH_TOKEN or GITHUB_TOKEN must be set"
-        )
+        raise RuntimeError("GH_TOKEN or GITHUB_TOKEN must be set")
 
     return token
 
@@ -56,84 +51,42 @@ def create_session(token):
     return session
 
 
-def api_get(
-    session,
-    url,
-    *,
-    params=None,
-    retries=5,
-):
+def api_get(session, url, *, params=None, retries=5):
     for attempt in range(retries):
-
         try:
-            response = session.get(
-                url,
-                params=params,
-                timeout=30,
-            )
+            response = session.get(url, params=params, timeout=30)
 
         except requests.RequestException:
-
             if attempt == retries - 1:
                 raise
 
             time.sleep(2 ** attempt)
             continue
 
-        remaining = response.headers.get(
-            "X-RateLimit-Remaining"
-        )
+        remaining = response.headers.get("X-RateLimit-Remaining")
 
         if remaining and int(remaining) < 100:
-            print(
-                f"WARNING: API quota low: {remaining}"
-            )
+            print(f"WARNING: API quota low: {remaining}")
 
-        if response.status_code in (
-            429,
-            500,
-            502,
-            503,
-            504,
-        ):
-
+        if response.status_code in (429, 500, 502, 503, 504):
             if attempt == retries - 1:
                 response.raise_for_status()
 
-            retry_after = response.headers.get(
-                "Retry-After"
-            )
+            retry_after = response.headers.get("Retry-After")
+            delay = int(retry_after) if retry_after else 2 ** attempt
 
-            delay = (
-                int(retry_after)
-                if retry_after
-                else 2 ** attempt
-            )
-
-            print(
-                f"Retry {response.status_code} "
-                f"in {delay}s"
-            )
-
+            print(f"Retry {response.status_code} in {delay}s")
             time.sleep(delay)
             continue
 
         response.raise_for_status()
-
         return response
 
     raise RuntimeError("GitHub API failed")
 
 
-def print_quota(
-    session,
-    base_url,
-):
-    data = api_get(
-        session,
-        f"{base_url}/rate_limit",
-    ).json()
-
+def print_quota(session, base_url):
+    data = api_get(session, f"{base_url}/rate_limit").json()
     core = data["resources"]["core"]
 
     reset = dt.datetime.fromtimestamp(
@@ -148,21 +101,10 @@ def print_quota(
     print(f"  Reset:     {reset}")
 
 
-def workflow_info(
-    session,
-    base_url,
-    owner,
-    repo,
-    workflow_file,
-):
+def workflow_info(session, base_url, owner, repo, workflow_file):
     return api_get(
         session,
-        (
-            f"{base_url}"
-            f"/repos/{owner}/{repo}"
-            f"/actions/workflows/"
-            f"{workflow_file}"
-        ),
+        f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_file}",
     ).json()
 
 
@@ -179,7 +121,6 @@ def iter_runs(
     """
     Fetch all workflow runs within the requested date range.
 
-    Important:
     No workflow status or conclusion filter is applied here.
     The cache always receives all workflow runs.
     """
@@ -187,7 +128,6 @@ def iter_runs(
     page = 1
 
     while True:
-
         if max_pages and page > max_pages:
             break
 
@@ -199,12 +139,7 @@ def iter_runs(
 
         response = api_get(
             session,
-            (
-                f"{base_url}"
-                f"/repos/{owner}/{repo}"
-                f"/actions/workflows/"
-                f"{workflow_id}/runs"
-            ),
+            f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
             params=params,
         )
 
@@ -213,32 +148,18 @@ def iter_runs(
         if not runs:
             break
 
-        for run in runs:
-            yield run
-
+        yield from runs
         page += 1
 
 
-def iter_jobs(
-    session,
-    base_url,
-    owner,
-    repo,
-    run_id,
-):
+def iter_jobs(session, base_url, owner, repo, run_id):
     jobs = []
     page = 1
 
     while True:
-
         response = api_get(
             session,
-            (
-                f"{base_url}"
-                f"/repos/{owner}/{repo}"
-                f"/actions/runs/{run_id}"
-                f"/jobs"
-            ),
+            f"{base_url}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
             params={
                 "per_page": 100,
                 "page": page,
@@ -257,31 +178,17 @@ def iter_jobs(
 
 
 def calculate_job_duration_in_seconds(job):
-    if (
-        not job.get("started_at")
-        or not job.get("completed_at")
-    ):
+    if not job.get("started_at") or not job.get("completed_at"):
         return None
 
-    start = dt.datetime.strptime(
-        job["started_at"],
-        "%Y-%m-%dT%H:%M:%SZ",
-    )
+    start = dt.datetime.strptime(job["started_at"], "%Y-%m-%dT%H:%M:%SZ")
+    end = dt.datetime.strptime(job["completed_at"], "%Y-%m-%dT%H:%M:%SZ")
 
-    end = dt.datetime.strptime(
-        job["completed_at"],
-        "%Y-%m-%dT%H:%M:%SZ",
-    )
-
-    return int(
-        (end - start).total_seconds()
-    )
+    return int((end - start).total_seconds())
 
 
 def now_iso():
-    return dt.datetime.now(
-        dt.timezone.utc
-    ).isoformat()
+    return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
 def load_cache(path):
@@ -291,17 +198,11 @@ def load_cache(path):
             "runs": [],
         }
 
-    with open(
-        path,
-        "r",
-        encoding="utf-8",
-    ) as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, dict):
-        raise RuntimeError(
-            f"{path} must contain a JSON object"
-        )
+        raise RuntimeError(f"{path} must contain a JSON object")
 
     if "runs" not in data:
         data["runs"] = []
@@ -309,13 +210,8 @@ def load_cache(path):
     return data
 
 
-def save_cache(
-    path,
-    data,
-):
-    directory = os.path.dirname(
-        os.path.abspath(path)
-    )
+def save_cache(path, data):
+    directory = os.path.dirname(os.path.abspath(path))
 
     fd, tmp_path = tempfile.mkstemp(
         dir=directory,
@@ -324,24 +220,12 @@ def save_cache(
     )
 
     try:
-        with os.fdopen(
-            fd,
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(
-                data,
-                f,
-                indent=2,
-            )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
-        os.replace(
-            tmp_path,
-            path,
-        )
+        os.replace(tmp_path, path)
 
     finally:
-
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
@@ -372,24 +256,14 @@ def create_job_cache_entry(job):
             "id": job["id"],
             "name": job["name"],
             "html_url": job["html_url"],
-            "duration_sec": (
-                calculate_job_duration_in_seconds(
-                    job
-                )
-            ),
+            "duration_sec": calculate_job_duration_in_seconds(job),
             "status": job["status"],
             "conclusion": job["conclusion"],
         }
     }
 
 
-def fetch_jobs(
-    session,
-    base_url,
-    owner,
-    repo,
-    run_id,
-):
+def fetch_jobs(session, base_url, owner, repo, run_id):
     """
     Fetch and cache all jobs for a workflow run.
 
@@ -398,36 +272,15 @@ def fetch_jobs(
 
     return [
         create_job_cache_entry(job)
-        for job in iter_jobs(
-            session,
-            base_url,
-            owner,
-            repo,
-            run_id,
-        )
+        for job in iter_jobs(session, base_url, owner, repo, run_id)
     ]
 
 
-def process_job_run(
-    session,
-    base_url,
-    owner,
-    repo,
-    run,
-):
-    return fetch_jobs(
-        session,
-        base_url,
-        owner,
-        repo,
-        run["id"],
-    )
+def process_job_run(session, base_url, owner, repo, run):
+    return fetch_jobs(session, base_url, owner, repo, run["id"])
 
 
-def update_run_cache_entry(
-    cached,
-    run,
-):
+def update_run_cache_entry(cached, run):
     """
     Update the workflow-run information from GitHub.
 
@@ -444,16 +297,10 @@ def update_run_cache_entry(
 
 def main():
     parser = argparse.ArgumentParser(
-        description=(
-            "Update a GitHub Actions workflow-run "
-            "cache."
-        )
+        description="Update a GitHub Actions workflow-run cache."
     )
 
-    subparsers = parser.add_subparsers(
-        dest="command",
-        required=True,
-    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ------------------------------------------------------------------
     # quota
@@ -472,10 +319,7 @@ def main():
 
     collect_runs_parser = subparsers.add_parser(
         "runs",
-        help=(
-            "Update the GitHub Actions workflow-run "
-            "cache."
-        ),
+        help="Update the GitHub Actions workflow-run cache.",
     )
 
     collect_runs_parser.add_argument(
@@ -512,20 +356,14 @@ def main():
         "--workers",
         type=int,
         default=5,
-        help=(
-            "Number of concurrent worker threads "
-            "for job processing"
-        ),
+        help="Number of concurrent worker threads for job processing",
     )
 
     collect_runs_parser.add_argument(
         "--max-pages",
         type=int,
         default=None,
-        help=(
-            "Maximum number of pages to fetch "
-            "for workflow runs"
-        ),
+        help="Maximum number of pages to fetch for workflow runs",
     )
 
     collect_runs_parser.add_argument(
@@ -539,8 +377,7 @@ def main():
         default=None,
         help=(
             "Cache file name. "
-            "If not provided, the workflow filename "
-            "is used."
+            "If not provided, the workflow filename is used."
         ),
     )
 
@@ -551,10 +388,7 @@ def main():
     session = create_session(token)
 
     if args.command == "quota":
-        print_quota(
-            session,
-            base_url,
-        )
+        print_quota(session, base_url)
         return
 
     # ------------------------------------------------------------------
@@ -571,28 +405,17 @@ def main():
 
     print(f"Workflow: {workflow['name']}")
     print(f"Workflow ID: {workflow['id']}")
-    print(
-        f"Date range: "
-        f"{args.from_date} .. {args.to_date}"
-    )
+    print(f"Date range: {args.from_date} .. {args.to_date}")
 
     # ------------------------------------------------------------------
     # Cache path
     # ------------------------------------------------------------------
 
-    output_dir = os.path.abspath(
-        args.output_dir
-    )
-
-    os.makedirs(
-        output_dir,
-        exist_ok=True,
-    )
+    output_dir = os.path.abspath(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     if args.output_file:
-        cache_file = os.path.abspath(
-            args.output_file
-        )
+        cache_file = os.path.abspath(args.output_file)
     else:
         cache_file = os.path.join(
             output_dir,
@@ -604,10 +427,7 @@ def main():
     # ------------------------------------------------------------------
 
     cache = load_cache(cache_file)
-
-    cache["workflow"] = (
-        create_workflow_cache_entry(workflow)
-    )
+    cache["workflow"] = create_workflow_cache_entry(workflow)
 
     cached_runs = {
         str(item["run_id"]): item
@@ -615,10 +435,7 @@ def main():
         if "run_id" in item
     }
 
-    print(
-        f"Cached workflow runs: "
-        f"{len(cached_runs)}"
-    )
+    print(f"Cached workflow runs: {len(cached_runs)}")
 
     # ------------------------------------------------------------------
     # Fetch workflow runs
@@ -641,9 +458,7 @@ def main():
         )
     )
 
-    print(
-        f"Workflow runs found: {len(runs)}"
-    )
+    print(f"Workflow runs found: {len(runs)}")
 
     # ------------------------------------------------------------------
     # Update workflow-run cache
@@ -656,31 +471,16 @@ def main():
     cached_completed_runs = 0
 
     for run in runs:
-
         run_id = str(run["id"])
 
         if run_id not in cached_runs:
-
-            cached_runs[run_id] = (
-                create_run_cache_entry(run)
-            )
-
+            cached_runs[run_id] = create_run_cache_entry(run)
             new_runs += 1
-
-            print(
-                f"Caching new workflow run "
-                f"{run_id}"
-            )
+            print(f"Caching new workflow run {run_id}")
 
         else:
-
             cached = cached_runs[run_id]
-
-            update_run_cache_entry(
-                cached,
-                run,
-            )
-
+            update_run_cache_entry(cached, run)
             updated_runs += 1
 
         cached = cached_runs[run_id]
@@ -690,18 +490,9 @@ def main():
         # our purposes. The jobs API does not need to be queried again.
         # --------------------------------------------------------------
 
-        if (
-            run["status"] == "completed"
-            and "jobs" in cached
-        ):
+        if run["status"] == "completed" and "jobs" in cached:
             cached_completed_runs += 1
-
-            print(
-                f"Using cached jobs for "
-                f"completed workflow run "
-                f"{run_id}"
-            )
-
+            print(f"Using cached jobs for completed workflow run {run_id}")
             continue
 
         # --------------------------------------------------------------
@@ -716,17 +507,10 @@ def main():
     # Update jobs concurrently
     # ------------------------------------------------------------------
 
-    print(
-        f"Workflow runs requiring job update: "
-        f"{len(runs_to_process)}"
-    )
+    print(f"Workflow runs requiring job update: {len(runs_to_process)}")
 
     if runs_to_process:
-
-        with ThreadPoolExecutor(
-            max_workers=args.workers
-        ) as executor:
-
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
             futures = {
                 executor.submit(
                     process_job_run,
@@ -739,15 +523,10 @@ def main():
                 for run in runs_to_process
             }
 
-            for future in as_completed(
-                futures
-            ):
-
+            for future in as_completed(futures):
                 run = futures[future]
                 run_id = str(run["id"])
-
                 jobs = future.result()
-
                 cached = cached_runs[run_id]
 
                 # Replace the complete job snapshot.
@@ -755,29 +534,20 @@ def main():
                 # This is important for runs that are still in
                 # progress because their jobs can change between
                 # cache updates.
+
                 cached["jobs"] = jobs
                 cached["jobs_cached_at"] = now_iso()
 
-                print(
-                    f"Updated {len(jobs)} jobs "
-                    f"for workflow run "
-                    f"{run_id}"
-                )
+                print(f"Updated {len(jobs)} jobs for workflow run {run_id}")
 
     # ------------------------------------------------------------------
     # Save complete cache
     # ------------------------------------------------------------------
 
-    cache["runs"] = list(
-        cached_runs.values()
-    )
-
+    cache["runs"] = list(cached_runs.values())
     cache["updated_at"] = now_iso()
 
-    save_cache(
-        cache_file,
-        cache,
-    )
+    save_cache(cache_file, cache)
 
     # ------------------------------------------------------------------
     # Summary
@@ -785,35 +555,17 @@ def main():
 
     print()
     print("Cache update completed.")
-    print(
-        f"  Runs found:             {len(runs)}"
-    )
-    print(
-        f"  New runs:               {new_runs}"
-    )
-    print(
-        f"  Updated runs:           {updated_runs}"
-    )
-    print(
-        f"  Completed runs cached:  "
-        f"{cached_completed_runs}"
-    )
-    print(
-        f"  Runs with job update:   "
-        f"{len(runs_to_process)}"
-    )
-    print(
-        f"  Total cached runs:      "
-        f"{len(cache['runs'])}"
-    )
-    print(
-        f"  Cache:                  {cache_file}"
-    )
+    print(f"  Runs found:             {len(runs)}")
+    print(f"  New runs:               {new_runs}")
+    print(f"  Updated runs:           {updated_runs}")
+    print(f"  Completed runs cached:  {cached_completed_runs}")
+    print(f"  Runs with job update:   {len(runs_to_process)}")
+    print(f"  Total cached runs:      {len(cache['runs'])}")
+    print(f"  Cache:                  {cache_file}")
 
 
 if __name__ == "__main__":
     try:
         main()
-
     except KeyboardInterrupt:
         sys.exit(130)

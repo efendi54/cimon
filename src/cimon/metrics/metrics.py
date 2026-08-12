@@ -442,9 +442,15 @@ def main():
     # ------------------------------------------------------------------
     # Load cache
     # ------------------------------------------------------------------
-
     cache = load_cache(cache_file)
-    cache["workflow"] = create_workflow_cache_entry(workflow)
+    cache["workflow"] = {
+        "owner": args.owner,
+        "repo": args.repo,
+        "host": host,
+        "id": workflow["id"],
+        "name": workflow["name"],
+        "file": workflow["path"],
+    }
 
     cached_runs = {
         str(item["run_id"]): item

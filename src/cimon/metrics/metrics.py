@@ -421,10 +421,6 @@ def main():
         args.workflow,
     )
 
-    print(f"Workflow: {workflow['name']}")
-    print(f"Workflow ID: {workflow['id']}")
-    print(f"Date range: {args.from_date} .. {args.to_date}")
-
     # ------------------------------------------------------------------
     # Cache path
     # ------------------------------------------------------------------
@@ -459,7 +455,6 @@ def main():
         if "run_id" in item
     }
 
-    print(f"Cached workflow runs: {len(cached_runs)}")
 
     # ------------------------------------------------------------------
     # Fetch workflow runs
@@ -468,6 +463,8 @@ def main():
     # Only the date range is used as a GitHub API filter.
     # No status/conclusion filter is applied.
     # ------------------------------------------------------------------
+    print(f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({args.workflow})")
+    print(f"Date range: {args.from_date} .. {args.to_date} ...")
 
     runs = list(
         iter_runs(
@@ -482,7 +479,10 @@ def main():
         )
     )
 
-    print(f"Workflow runs found: {len(runs)}")
+    # print(f"Workflow: {workflow['name']}")
+    # print(f"Workflow ID: {workflow['id']}")
+    # print(f"Date range: {args.from_date} .. {args.to_date} ({len(runs)} runs found)")
+    # print(f"Currently cached workflow runs: {len(cached_runs)}")
 
     # ------------------------------------------------------------------
     # Update workflow-run cache
@@ -516,7 +516,6 @@ def main():
 
         if run["status"] == "completed" and "jobs" in cached:
             cached_completed_runs += 1
-            print(f"Using cached jobs for completed workflow run {run_id}")
             continue
 
         # --------------------------------------------------------------

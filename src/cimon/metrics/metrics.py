@@ -11,31 +11,12 @@ import argparse
 import datetime as dt
 import json
 import os
+import requests
 import sys
 import tempfile
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import requests
-
-
-def get_token():
-    token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
-
-    if not token:
-        raise RuntimeError("GH_TOKEN or GITHUB_TOKEN must be set")
-
-    return token
-
-
-def get_api_base_url():
-    host = os.getenv("GH_HOST")
-
-    if not host:
-        raise RuntimeError("GH_HOST must be set")
-
-    return f"https://{host}/api/v3"
 
 
 def create_session(token):
@@ -302,6 +283,24 @@ def main():
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 1.0.0",
+    )
+
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+        help="GitHub API token (will be read out from environment variables GH_TOKEN or GITHUB_TOKEN if not provided)",
+    )
+
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("GH_HOST"),
+        help="GitHub API host, e.g. git.hub.vwgroup.com (will be read out from environment variable GH_HOST if not provided)",
+    )
+
     # ------------------------------------------------------------------
     # quota
     # ------------------------------------------------------------------
@@ -383,8 +382,21 @@ def main():
 
     args = parser.parse_args()
 
-    token = get_token()
-    base_url = get_api_base_url()
+    token = args.token
+    if not args.token:
+        parser.error(
+            "No token provided and no environment variable set. Please set "
+            "GH_TOKEN or GITHUB_TOKEN."
+        )
+
+    host = args.host
+    if not host:
+        parser.error(
+            "No host provided and no environment variable set. Please set "
+            "GH_HOST."
+        )
+    base_url = f"https://{host}/api/v3"
+
     session = create_session(token)
 
     if args.command == "quota":

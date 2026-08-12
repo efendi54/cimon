@@ -67,7 +67,12 @@ def api_get(session, url, *, params=None, retries=5):
 
 
 def print_quota(session, base_url):
-    data = api_get(session, f"{base_url}/rate_limit").json()
+    try:
+        data = api_get(session, f"{base_url}/rate_limit", retries=1).json()
+    except requests.RequestException as e:
+        print(f"Failed to fetch GitHub API quota: {e}")
+        sys.exit(1)
+
     core = data["resources"]["core"]
 
     reset = dt.datetime.fromtimestamp(

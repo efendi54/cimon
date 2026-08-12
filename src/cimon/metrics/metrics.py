@@ -17,6 +17,7 @@ import tempfile
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 
 def create_session(token):
@@ -372,7 +373,7 @@ def main():
 
     collect_runs_parser.add_argument(
         "--output-dir",
-        default=".",
+        default=Path(os.path.expanduser("~")) / ".cache/cimon",
         help="Directory to save the cache file",
     )
 

@@ -14,6 +14,7 @@ import os
 import requests
 import sys
 import tempfile
+import threading
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -70,6 +71,7 @@ def api_get(session, url, *, params=None, retries=5):
 def print_quota(session, base_url):
     try:
         data = api_get(session, f"{base_url}/rate_limit", retries=1).json()
+
     except requests.RequestException as e:
         print(f"Failed to fetch GitHub API quota: {e}")
         sys.exit(1)
@@ -380,15 +382,13 @@ def main():
     collect_runs_parser.add_argument(
         "--output-file",
         default=None,
-        help=(
-            "Cache file name. "
-            "If not provided, the workflow filename is used."
-        ),
+        help="Cache file name. If not provided, the workflow filename is used.",
     )
 
     args = parser.parse_args()
 
     token = args.token
+
     if not args.token:
         parser.error(
             "No token provided and no environment variable set. Please set "
@@ -396,11 +396,13 @@ def main():
         )
 
     host = args.host
+
     if not host:
         parser.error(
             "No host provided and no environment variable set. Please set "
             "GH_HOST."
         )
+
     base_url = f"https://{host}/api/v3"
 
     session = create_session(token)
@@ -439,7 +441,9 @@ def main():
     # ------------------------------------------------------------------
     # Load cache
     # ------------------------------------------------------------------
+
     cache = load_cache(cache_file)
+
     cache["workflow"] = {
         "owner": args.owner,
         "repo": args.repo,
@@ -455,7 +459,6 @@ def main():
         if "run_id" in item
     }
 
-
     # ------------------------------------------------------------------
     # Fetch workflow runs
     #
@@ -463,26 +466,66 @@ def main():
     # Only the date range is used as a GitHub API filter.
     # No status/conclusion filter is applied.
     # ------------------------------------------------------------------
+
     print(f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({args.workflow})")
     print(f"Date range: {args.from_date} .. {args.to_date} ...")
 
-    runs = list(
-        iter_runs(
-            session,
-            base_url,
-            args.owner,
-            args.repo,
-            workflow["id"],
-            args.from_date,
-            args.to_date,
-            args.max_pages,
-        )
+    runs = None
+    fetch_error = None
+    fetch_done = threading.Event()
+
+    def fetch_workflow_runs():
+        nonlocal runs, fetch_error
+
+        try:
+            runs = list(
+                iter_runs(
+                    session,
+                    base_url,
+                    args.owner,
+                    args.repo,
+                    workflow["id"],
+                    args.from_date,
+                    args.to_date,
+                    args.max_pages,
+                )
+            )
+        except Exception as e:
+            fetch_error = e
+        finally:
+            fetch_done.set()
+
+    fetch_thread = threading.Thread(
+        target=fetch_workflow_runs,
+        name="workflow-run-fetch",
+        daemon=True,
     )
 
-    # print(f"Workflow: {workflow['name']}")
-    # print(f"Workflow ID: {workflow['id']}")
-    # print(f"Date range: {args.from_date} .. {args.to_date} ({len(runs)} runs found)")
-    # print(f"Currently cached workflow runs: {len(cached_runs)}")
+    fetch_thread.start()
+
+    # ------------------------------------------------------------------
+    # Spinner
+    # ------------------------------------------------------------------
+
+    spinner = "|/-\\"
+    spinner_index = 0
+
+    while not fetch_done.wait(0.05):
+        char = spinner[spinner_index % len(spinner)]
+        spinner_index += 1
+
+        sys.stdout.write(f"\rFetching workflow runs ... {char}")
+        sys.stdout.flush()
+
+    fetch_thread.join()
+
+    if fetch_error is not None:
+        sys.stdout.write("\rFetching workflow runs ... FAILED\n")
+        sys.stdout.flush()
+        raise fetch_error
+
+    sys.stdout.write(f"\rFetching workflow runs ... done ({len(runs)} runs found)\n")
+    sys.stdout.flush()
 
     # ------------------------------------------------------------------
     # Update workflow-run cache

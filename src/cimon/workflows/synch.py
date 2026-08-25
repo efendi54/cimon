@@ -19,7 +19,6 @@ import os
 import sys
 import tempfile
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,14 +27,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 import requests
+from cimon.github_api import api_get, create_session
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator
 
 
 logger = logging.getLogger(__name__)
 
-MIN_API_QUOTA = 100
+WORKFLOWS_JSON_FILE_NAME = "workflows.json"
+WORKFLOWS_PARQUET_FILE_NAME = "workflows.parquet"
+HTTP_NOT_FOUND = 404
 
 PARQUET_SCHEMA = pa.schema(
     [
@@ -62,90 +64,6 @@ PARQUET_SCHEMA = pa.schema(
         ("job_conclusion", pa.string()),
     ],
 )
-
-
-def create_session(token: str) -> requests.Session:
-    """Create an authenticated GitHub API session."""
-    session = requests.Session()
-
-    session.headers.update(
-        {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-        })
-
-    return session
-
-
-def api_get(
-    session: requests.Session,
-    url: str,
-    *,
-    params: Mapping[str, Any] | None = None,
-    retries: int = 5,
-) -> requests.Response:
-    """Fetch a URL from the GitHub API, retrying transient failures."""
-    for attempt in range(retries):
-        try:
-            response = session.get(url, params=params, timeout=30)
-
-        except requests.RequestException:
-            if attempt == retries - 1:
-                raise
-
-            time.sleep(2 ** attempt)
-            continue
-
-        remaining = response.headers.get("X-RateLimit-Remaining")
-
-        if remaining and int(remaining) < MIN_API_QUOTA:
-            logger.warning("API quota low: %s", remaining)
-
-        if response.status_code in (429, 500, 502, 503, 504):
-            if attempt == retries - 1:
-                response.raise_for_status()
-
-            retry_after = response.headers.get("Retry-After")
-            delay = int(retry_after) if retry_after else 2 ** attempt
-
-            logger.warning("Retry %s in %ss", response.status_code, delay)
-            time.sleep(delay)
-            continue
-
-        response.raise_for_status()
-        return response
-
-    error_message = "GitHub API failed"
-    raise RuntimeError(error_message)
-
-
-def print_quota(session: requests.Session, base_url: str) -> None:
-    """Print the current GitHub API quota."""
-    try:
-        data = api_get(session, f"{base_url}/rate_limit", retries=1).json()
-
-    except requests.RequestException:
-        logger.exception("Failed to fetch GitHub API quota")
-        sys.exit(1)
-
-    core = data["resources"]["core"]
-
-    reset = dt.datetime.fromtimestamp(
-        core["reset"],
-        tz=dt.timezone.utc,
-    )
-
-    logger.info(
-        "GitHub API quota:\n"
-        "  Limit:     %s\n"
-        "  Used:      %s\n"
-        "  Remaining: %s\n"
-        "  Reset:     %s",
-        core["limit"],
-        core["used"],
-        core["remaining"],
-        reset,
-    )
 
 
 def workflow_info(
@@ -497,13 +415,11 @@ def update_run_cache_entry(
     cached["updated_at"] = now_iso()
 
 
-def main() -> None:  # noqa: C901, PLR0912, PLR0915
+def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     """Run the command-line metrics collector."""
     parser = argparse.ArgumentParser(
         description="Update a GitHub Actions workflow-run cache.",
     )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
 
     parser.add_argument(
         "--log-level",
@@ -539,105 +455,59 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         "environment variable GH_HOST if not provided)",
     )
 
-    # ------------------------------------------------------------------
-    # quota
-    # ------------------------------------------------------------------
-
-    subparsers.add_parser(
-        "quota",
-        help="Show the GitHub API quota.",
-    )
-
-    update_parquet_parser = subparsers.add_parser(
-        "update-parquet",
-        help="Update a Parquet cache from a JSON request snapshot.",
-    )
-    update_parquet_parser.add_argument(
-        "json_file",
-        type=Path,
-        help="JSON snapshot produced by the runs command",
-    )
-    update_parquet_parser.add_argument(
-        "--parquet-file",
-        required=True,
-        type=Path,
-        help="Persistent Parquet cache file to update",
-    )
-
-    # ------------------------------------------------------------------
-    # runs
-    # ------------------------------------------------------------------
-
     today = dt.datetime.now(tz=dt.timezone.utc).date().isoformat()
 
-    collect_runs_parser = subparsers.add_parser(
-        "runs",
-        help="Update the GitHub Actions workflow-run cache.",
-    )
-
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--owner",
-        default="CARIAD",
+        default="CAS",
         help="Repository owner",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--repo",
         default="app-adas-src",
         help="Repository name",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--workflow",
-        required=True,
         help="Workflow filename (e.g. pr.yml)",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--from-date",
         default=today,
         help="Start date (YYYY-MM-DD)",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--to-date",
         default=today,
         help="End date (YYYY-MM-DD)",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--workers",
         type=int,
         default=5,
         help="Number of concurrent worker threads for job processing",
     )
 
-    collect_runs_parser.add_argument(
+    parser.add_argument(
         "--max-pages",
         type=int,
         default=None,
         help="Maximum number of pages to fetch for workflow runs",
     )
 
-    collect_runs_parser.add_argument(
-        "--output-dir",
+    parser.add_argument(
+        "--cache-dir",
         default=Path.home() / ".cache/cimon",
-        help="Directory for default cache file paths",
+        type=Path,
+        help="Directory where workflows.json and workflows.parquet are written.",
     )
 
-    collect_runs_parser.add_argument(
-        "--output-file",
-        default=None,
-        help="JSON snapshot file. Defaults to the Parquet path with a .json suffix.",
-    )
-
-    collect_runs_parser.add_argument(
-        "--parquet-file",
-        default=None,
-        help="Persistent Parquet cache file. Defaults to <output-dir>/<workflow>.parquet.",
-    )
-
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     handlers = [logging.StreamHandler(sys.stdout)]
     if args.log_file:
@@ -649,11 +519,6 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         format="%(levelname)s: %(message)s",
         handlers=handlers,
     )
-
-    if args.command == "update-parquet":
-        merge_parquet_cache(str(args.parquet_file), load_cache(str(args.json_file)))
-        logger.info("Updated Parquet cache: %s", args.parquet_file)
-        return
 
     token = args.token
 
@@ -675,41 +540,34 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     session = create_session(token)
 
-    if args.command == "quota":
-        print_quota(session, base_url)
-        return
-
     # ------------------------------------------------------------------
     # Workflow information
     # ------------------------------------------------------------------
 
-    workflow = workflow_info(
-        session,
-        base_url,
-        args.owner,
-        args.repo,
-        args.workflow,
-    )
+    try:
+        workflow = workflow_info(
+            session,
+            base_url,
+            args.owner,
+            args.repo,
+            args.workflow,
+        )
+    except requests.HTTPError as error:
+        if error.response is not None and error.response.status_code == HTTP_NOT_FOUND:
+            parser.error(
+                "Workflow not found (404). Please check --owner, --repo, --workflow and --host. "
+                f"Requested: {args.owner}/{args.repo} workflow {args.workflow}",
+            )
+        raise
 
     # ------------------------------------------------------------------
     # Cache path
     # ------------------------------------------------------------------
 
-    output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.parquet_file:
-        parquet_file = Path(args.parquet_file).resolve()
-    elif args.output_file:
-        parquet_file = Path(args.output_file).resolve().with_suffix(".parquet")
-    else:
-        parquet_file = output_dir / f"{Path(args.workflow).stem}.parquet"
-
-    cache_file = (
-        str(Path(args.output_file).resolve())
-        if args.output_file
-        else str(parquet_file.with_suffix(".json"))
-    )
+    cache_dir = Path(args.cache_dir).resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
+    cache_file = str(cache_dir / WORKFLOWS_JSON_FILE_NAME)
 
     # ------------------------------------------------------------------
     # Load cache

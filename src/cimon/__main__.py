@@ -1,7 +1,5 @@
-"""
-CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff.
-
-"""
+# ruff: noqa: CPY001
+"""CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff."""
 
 import logging
 import sys
@@ -9,8 +7,12 @@ from pathlib import Path
 
 import click
 
+import requests
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
+from cimon.github_api import create_session, print_quota
 from cimon.monitoring.active_jobs import active_jobs
+from cimon.workflows import synch
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +96,51 @@ def jobmon() -> None:
     """Showing actively running jobs in the CI."""
     logger.debug("Job monitoring is not yet implemented.")
     active_jobs()
+
+
+@main.command()
+@click.option(
+    "--token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+    help="GitHub API token. Defaults to GH_TOKEN or GITHUB_TOKEN.",
+)
+@click.option(
+    "--host",
+    envvar="GH_HOST",
+    required=False,
+    help="GitHub API host, e.g. git.hub.vwgroup.com. Defaults to GH_HOST.",
+)
+def quota(token: str | None, host: str | None) -> None:
+    """Show the GitHub API quota."""
+    if not token:
+        msg = (
+            "No token provided and no environment variable set. "
+            "Please set GH_TOKEN or GITHUB_TOKEN."
+        )
+        raise click.UsageError(msg)
+
+    if not host:
+        msg = "No host provided and no environment variable set. Please set GH_HOST."
+        raise click.UsageError(msg)
+
+    try:
+        session = create_session(token)
+        print_quota(session, f"https://{host}/api/v3")
+    except requests.RequestException:
+        logger.exception("Failed to fetch GitHub API quota")
+        raise click.Abort from None
+
+
+@main.command(
+    "synch-wf-cache",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    add_help_option=False,
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def synch_wf_cache(args: tuple[str, ...]) -> None:
+    """Run the workflow-run cache synchronizer."""
+    synch.main(list(args))
 
 if __name__ == "__main__":
     main()

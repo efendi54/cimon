@@ -1,6 +1,8 @@
+# ruff: noqa: CPY001
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#     "pyarrow>=21.0.0",
 #     "requests>=2.34.2",
 # ]
 # ///
@@ -22,6 +24,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 import requests
 
 if TYPE_CHECKING:
@@ -31,6 +36,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MIN_API_QUOTA = 100
+
+PARQUET_SCHEMA = pa.schema(
+    [
+        ("owner", pa.string()),
+        ("repo", pa.string()),
+        ("host", pa.string()),
+        ("workflow_id", pa.string()),
+        ("workflow_name", pa.string()),
+        ("workflow_file", pa.string()),
+        ("run_id", pa.string()),
+        ("run_number", pa.int64()),
+        ("workflow_run_url", pa.string()),
+        ("workflow_status", pa.string()),
+        ("workflow_conclusion", pa.string()),
+        ("created_at", pa.string()),
+        ("cached_at", pa.string()),
+        ("updated_at", pa.string()),
+        ("jobs_cached_at", pa.string()),
+        ("job_id", pa.string()),
+        ("job_name", pa.string()),
+        ("job_url", pa.string()),
+        ("job_duration_sec", pa.int64()),
+        ("job_status", pa.string()),
+        ("job_conclusion", pa.string()),
+    ],
+)
 
 
 def create_session(token: str) -> requests.Session:
@@ -252,6 +283,7 @@ def save_cache(path: str, data: dict[str, Any]) -> None:
     """Atomically save cache data as formatted JSON."""
     cache_path = Path(path)
     directory = cache_path.resolve().parent
+    directory.mkdir(parents=True, exist_ok=True)
 
     fd, tmp_path = tempfile.mkstemp(
         dir=directory,
@@ -270,6 +302,117 @@ def save_cache(path: str, data: dict[str, Any]) -> None:
             Path(tmp_path).unlink()
 
 
+def cache_to_parquet_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the current JSON snapshot into one row per run and job."""
+    workflow = data.get("workflow") or {}
+    rows = []
+
+    for run in data.get("runs", []):
+        jobs = run.get("jobs") or [{}]
+        for job_entry in jobs:
+            job = job_entry.get("job", {})
+            rows.append(
+                {
+                    "owner": workflow.get("owner"),
+                    "repo": workflow.get("repo"),
+                    "host": workflow.get("host"),
+                    "workflow_id": str(workflow["id"]) if workflow.get("id") is not None else None,
+                    "workflow_name": workflow.get("name"),
+                    "workflow_file": workflow.get("file"),
+                    "run_id": str(run["run_id"]) if run.get("run_id") is not None else None,
+                    "run_number": run.get("run_number"),
+                    "workflow_run_url": run.get("workflow_run_url"),
+                    "workflow_status": run.get("workflow_status"),
+                    "workflow_conclusion": run.get("workflow_conclusion"),
+                    "created_at": run.get("created_at"),
+                    "cached_at": run.get("cached_at"),
+                    "updated_at": run.get("updated_at"),
+                    "jobs_cached_at": run.get("jobs_cached_at"),
+                    "job_id": str(job["id"]) if job.get("id") is not None else None,
+                    "job_name": job.get("name"),
+                    "job_url": job.get("html_url"),
+                    "job_duration_sec": job.get("duration_sec"),
+                    "job_status": job.get("status"),
+                    "job_conclusion": job.get("conclusion"),
+                },
+            )
+
+    return rows
+
+
+def load_parquet(path: str) -> list[dict[str, Any]]:
+    """Load existing Parquet rows, or return an empty cache."""
+    parquet_path = Path(path)
+    if not parquet_path.exists():
+        return []
+    return pq.read_table(parquet_path).to_pylist()
+
+
+def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict[str, list[dict[str, Any]]]]:
+    """Build a run index and reusable job snapshots from Parquet rows."""
+    existing_run_ids = set()
+    jobs_by_run: dict[str, list[dict[str, Any]]] = {}
+
+    for row in rows:
+        run_id = row.get("run_id")
+        if not run_id:
+            continue
+
+        existing_run_ids.add(str(run_id))
+
+        job_id = row.get("job_id")
+        if job_id is None:
+            continue
+
+        job_entry = {
+            "job": {
+                "id": int(job_id) if str(job_id).isdigit() else job_id,
+                "name": row.get("job_name"),
+                "html_url": row.get("job_url"),
+                "duration_sec": row.get("job_duration_sec"),
+                "status": row.get("job_status"),
+                "conclusion": row.get("job_conclusion"),
+            },
+        }
+
+        jobs_by_run.setdefault(str(run_id), []).append(job_entry)
+
+    return existing_run_ids, jobs_by_run
+
+
+def merge_parquet_cache(path: str, request_data: dict[str, Any]) -> None:
+    """Replace runs in the persistent Parquet cache with the JSON snapshot."""
+    current_rows = cache_to_parquet_rows(request_data)
+    request_run_ids = {
+        row["run_id"] for row in current_rows if row.get("run_id") is not None
+    }
+    existing_rows = [
+        row for row in load_parquet(path)
+        if row.get("run_id") not in request_run_ids
+    ]
+    save_parquet(path, existing_rows + current_rows)
+
+
+def save_parquet(path: str, rows: list[dict[str, Any]]) -> None:
+    """Atomically save Parquet cache data."""
+    parquet_path = Path(path)
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=parquet_path.parent,
+        prefix=".cache_",
+        suffix=".parquet",
+    )
+    os.close(fd)
+
+    try:
+        table = pa.Table.from_pylist(rows, schema=PARQUET_SCHEMA)
+        pq.write_table(table, tmp_path)
+        Path(tmp_path).replace(parquet_path)
+    finally:
+        if Path(tmp_path).exists():
+            Path(tmp_path).unlink()
+
+
 def create_workflow_cache_entry(workflow: dict[str, Any]) -> dict[str, Any]:
     """Create a cache entry for workflow metadata."""
     return {
@@ -281,6 +424,7 @@ def create_workflow_cache_entry(workflow: dict[str, Any]) -> dict[str, Any]:
 
 def create_run_cache_entry(run: dict[str, Any]) -> dict[str, Any]:
     """Create a cache entry for a workflow run."""
+    timestamp = now_iso()
     return {
         "run_id": run["id"],
         "run_number": run["run_number"],
@@ -288,7 +432,8 @@ def create_run_cache_entry(run: dict[str, Any]) -> dict[str, Any]:
         "workflow_status": run["status"],
         "workflow_conclusion": run["conclusion"],
         "created_at": run["created_at"],
-        "cached_at": now_iso(),
+        "cached_at": timestamp,
+        "updated_at": timestamp,
     }
 
 
@@ -352,7 +497,7 @@ def update_run_cache_entry(
     cached["updated_at"] = now_iso()
 
 
-def main() -> None:  # noqa: PLR0915
+def main() -> None:  # noqa: C901, PLR0912, PLR0915
     """Run the command-line metrics collector."""
     parser = argparse.ArgumentParser(
         description="Update a GitHub Actions workflow-run cache.",
@@ -401,6 +546,22 @@ def main() -> None:  # noqa: PLR0915
     subparsers.add_parser(
         "quota",
         help="Show the GitHub API quota.",
+    )
+
+    update_parquet_parser = subparsers.add_parser(
+        "update-parquet",
+        help="Update a Parquet cache from a JSON request snapshot.",
+    )
+    update_parquet_parser.add_argument(
+        "json_file",
+        type=Path,
+        help="JSON snapshot produced by the runs command",
+    )
+    update_parquet_parser.add_argument(
+        "--parquet-file",
+        required=True,
+        type=Path,
+        help="Persistent Parquet cache file to update",
     )
 
     # ------------------------------------------------------------------
@@ -461,13 +622,19 @@ def main() -> None:  # noqa: PLR0915
     collect_runs_parser.add_argument(
         "--output-dir",
         default=Path.home() / ".cache/cimon",
-        help="Directory to save the cache file",
+        help="Directory for default cache file paths",
     )
 
     collect_runs_parser.add_argument(
         "--output-file",
         default=None,
-        help="Cache file name. If not provided, the workflow filename is used.",
+        help="JSON snapshot file. Defaults to the Parquet path with a .json suffix.",
+    )
+
+    collect_runs_parser.add_argument(
+        "--parquet-file",
+        default=None,
+        help="Persistent Parquet cache file. Defaults to <output-dir>/<workflow>.parquet.",
     )
 
     args = parser.parse_args()
@@ -482,6 +649,11 @@ def main() -> None:  # noqa: PLR0915
         format="%(levelname)s: %(message)s",
         handlers=handlers,
     )
+
+    if args.command == "update-parquet":
+        merge_parquet_cache(str(args.parquet_file), load_cache(str(args.json_file)))
+        logger.info("Updated Parquet cache: %s", args.parquet_file)
+        return
 
     token = args.token
 
@@ -526,16 +698,31 @@ def main() -> None:  # noqa: PLR0915
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.output_file:
-        cache_file = str(Path(args.output_file).resolve())
+    if args.parquet_file:
+        parquet_file = Path(args.parquet_file).resolve()
+    elif args.output_file:
+        parquet_file = Path(args.output_file).resolve().with_suffix(".parquet")
     else:
-        cache_file = str(output_dir / f"{Path(args.workflow).name}.json")
+        parquet_file = output_dir / f"{Path(args.workflow).stem}.parquet"
+
+    cache_file = (
+        str(Path(args.output_file).resolve())
+        if args.output_file
+        else str(parquet_file.with_suffix(".json"))
+    )
 
     # ------------------------------------------------------------------
     # Load cache
     # ------------------------------------------------------------------
 
-    cache = load_cache(cache_file)
+    existing_parquet_rows = load_parquet(str(parquet_file))
+    existing_run_ids, cached_jobs_by_run = cached_jobs_from_parquet(existing_parquet_rows)
+
+    # The JSON file is deliberately a snapshot of this request only.
+    cache = {
+        "workflow": None,
+        "runs": [],
+    }
 
     cache["workflow"] = {
         "owner": args.owner,
@@ -546,11 +733,7 @@ def main() -> None:  # noqa: PLR0915
         "file": workflow["path"],
     }
 
-    cached_runs = {
-        str(item["run_id"]): item
-        for item in cache["runs"]
-        if "run_id" in item
-    }
+    cached_runs = {}
 
     # ------------------------------------------------------------------
     # Fetch workflow runs
@@ -632,25 +815,25 @@ def main() -> None:  # noqa: PLR0915
 
     for run in runs:
         run_id = str(run["id"])
+        cached = create_run_cache_entry(run)
+        cached_runs[run_id] = cached
 
-        if run_id not in cached_runs:
-            cached_runs[run_id] = create_run_cache_entry(run)
+        if run_id not in existing_run_ids:
             new_runs += 1
             logger.info(f"Caching new workflow run {run_id}")
 
         else:
-            cached = cached_runs[run_id]
             update_run_cache_entry(cached, run)
             updated_runs += 1
-
-        cached = cached_runs[run_id]
 
         # --------------------------------------------------------------
         # Completed runs with already cached jobs are immutable for
         # our purposes. The jobs API does not need to be queried again.
         # --------------------------------------------------------------
 
-        if run["status"] == "completed" and "jobs" in cached:
+        if run["status"] == "completed" and run_id in cached_jobs_by_run:
+            cached["jobs"] = cached_jobs_by_run[run_id]
+            cached["jobs_cached_at"] = now_iso()
             cached_completed_runs += 1
             continue
 
@@ -707,6 +890,7 @@ def main() -> None:  # noqa: PLR0915
     cache["updated_at"] = now_iso()
 
     save_cache(cache_file, cache)
+    merge_parquet_cache(str(parquet_file), cache)
 
     # ------------------------------------------------------------------
     # Summary
@@ -720,6 +904,7 @@ def main() -> None:  # noqa: PLR0915
     logger.info(f"  Runs with job update:   {len(runs_to_process)}")
     logger.info(f"  Total cached runs:      {len(cache['runs'])}")
     logger.info(f"  Cache:                  {cache_file}")
+    logger.info(f"  Parquet cache:          {parquet_file}")
 
 
 if __name__ == "__main__":

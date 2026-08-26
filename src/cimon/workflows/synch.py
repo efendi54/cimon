@@ -381,6 +381,9 @@ def save_parquet(path: str, rows: list[dict[str, Any]]) -> None:
 
     try:
         table = pa.Table.from_pylist(rows, schema=PARQUET_SCHEMA)
+        # PERF: once this grows past a single row group, sort rows by the columns
+        # queries filter on most (e.g. created_at, run_id) before writing, so
+        # WorkflowQuery's row-group pruning can actually skip blocks.
         pq.write_table(table, tmp_path)
         Path(tmp_path).replace(parquet_path)
     finally:

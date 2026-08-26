@@ -19,6 +19,7 @@ import os
 import sys
 import tempfile
 import threading
+from collections import ChainMap
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,17 +28,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 import requests
-from cimon.github_api import api_get, create_session
+from cimon.github_api import api_get, create_session, load_etag_cache, save_etag_cache
 from cimon.workflows.models import JobEntry, JobInfo, RunEntry, WorkflowCache, WorkflowInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, MutableMapping
 
 
 logger = logging.getLogger(__name__)
 
 WORKFLOWS_JSON_FILE_NAME = "workflows.json"
 WORKFLOWS_PARQUET_FILE_NAME = "workflows.parquet"
+ETAG_CACHE_FILE_NAME = "etag_cache.json"
 HTTP_NOT_FOUND = 404
 GITHUB_API_PER_PAGE = 100
 
@@ -78,11 +80,13 @@ def workflow_info(
     owner: str,
     repo: str,
     workflow_file: str,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> dict:
     """Fetch workflow metadata from the GitHub API."""
     return api_get(
         session,
         f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_file}",
+        etag_cache=etag_cache,
     ).json()
 
 
@@ -95,6 +99,7 @@ def iter_runs(
     from_date: str,
     to_date: str,
     max_pages: int | None = None,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> Iterator[dict]:
     """
     Fetch all workflow runs within the requested date range.
@@ -118,6 +123,7 @@ def iter_runs(
             session,
             f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
             params=params,
+            etag_cache=etag_cache,
         )
 
         runs = response.json()["workflow_runs"]
@@ -139,6 +145,7 @@ def iter_jobs(
     owner: str,
     repo: str,
     run_id: int | str,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Fetch all jobs associated with a workflow run."""
     jobs = []
@@ -152,6 +159,7 @@ def iter_jobs(
                 "per_page": GITHUB_API_PER_PAGE,
                 "page": page,
             },
+            etag_cache=etag_cache,
         )
 
         page_jobs = response.json()["jobs"]
@@ -187,6 +195,21 @@ def calculate_job_duration_in_seconds(job: dict[str, Any]) -> int | None:
 def now_iso() -> str:
     """Return the current UTC time in ISO 8601 format."""
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def format_file_size(path: str | Path) -> str:
+    """Return a human-readable file size, or "missing" if the file doesn't exist."""
+    file_path = Path(path)
+    if not file_path.exists():
+        return "missing"
+
+    size = float(file_path.stat().st_size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:  # noqa: PLR2004
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+    return f"{size:.1f} TB"
 
 
 def load_cache(path: str) -> WorkflowCache:
@@ -421,6 +444,7 @@ def fetch_jobs(
     owner: str,
     repo: str,
     run_id: int | str,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> list[JobEntry]:
     """
     Fetch and cache all jobs for a workflow run.
@@ -429,7 +453,7 @@ def fetch_jobs(
     """
     return [
         create_job_cache_entry(job)
-        for job in iter_jobs(session, base_url, owner, repo, run_id)
+        for job in iter_jobs(session, base_url, owner, repo, run_id, etag_cache=etag_cache)
     ]
 
 
@@ -439,9 +463,10 @@ def process_job_run(
     owner: str,
     repo: str,
     run: dict[str, Any],
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> list[JobEntry]:
     """Fetch jobs for a workflow run."""
-    return fetch_jobs(session, base_url, owner, repo, run["id"])
+    return fetch_jobs(session, base_url, owner, repo, run["id"], etag_cache=etag_cache)
 
 
 def update_run_cache_entry(
@@ -561,6 +586,24 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     session = create_session(token)
 
     # ------------------------------------------------------------------
+    # Cache paths
+    # ------------------------------------------------------------------
+
+    cache_dir = Path(args.cache_dir).resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
+    cache_file = str(cache_dir / WORKFLOWS_JSON_FILE_NAME)
+    etag_cache_file = str(cache_dir / ETAG_CACHE_FILE_NAME)
+
+    # Entries only get carried over to the next run if they are actually
+    # read or written this run (via the ChainMap below). This prunes stale
+    # entries for runs/pages that are no longer queried, e.g. once a run
+    # is fully cached as completed or the date range moves on.
+    persisted_etag_cache = load_etag_cache(etag_cache_file)
+    etag_cache: dict[str, dict[str, Any]] = {}
+    etag_cache_view = ChainMap(etag_cache, persisted_etag_cache)
+
+    # ------------------------------------------------------------------
     # Workflow information
     # ------------------------------------------------------------------
 
@@ -571,6 +614,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             args.owner,
             args.repo,
             args.workflow,
+            etag_cache=etag_cache_view,
         )
     except requests.HTTPError as error:
         if error.response is not None and error.response.status_code == HTTP_NOT_FOUND:
@@ -579,15 +623,6 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                 f"Requested: {args.owner}/{args.repo} workflow {args.workflow}",
             )
         raise
-
-    # ------------------------------------------------------------------
-    # Cache path
-    # ------------------------------------------------------------------
-
-    cache_dir = Path(args.cache_dir).resolve()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
-    cache_file = str(cache_dir / WORKFLOWS_JSON_FILE_NAME)
 
     # ------------------------------------------------------------------
     # Load cache
@@ -632,6 +667,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                     args.from_date,
                     args.to_date,
                     args.max_pages,
+                    etag_cache=etag_cache_view,
                 ),
             )
         except (requests.RequestException, RuntimeError) as error:
@@ -729,6 +765,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                     args.owner,
                     args.repo,
                     run,
+                    etag_cache=etag_cache_view,
                 ): run
                 for run in runs_to_process
             }
@@ -748,7 +785,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                 cached.jobs = jobs
                 cached.jobs_cached_at = now_iso()
 
-                logger.info(f"Updated {len(jobs)} jobs for workflow run {run_id}")
+                logger.debug(f"Updated {len(jobs)} jobs for workflow run {run_id}")
 
     # ------------------------------------------------------------------
     # Save complete cache
@@ -759,6 +796,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     save_cache(cache_file, cache)
     merge_parquet_cache(str(parquet_file), cache)
+    save_etag_cache(etag_cache_file, etag_cache)
 
     # ------------------------------------------------------------------
     # Summary
@@ -771,8 +809,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     logger.info(f"  Completed runs cached:  {cached_completed_runs}")
     logger.info(f"  Runs with job update:   {len(runs_to_process)}")
     logger.info(f"  Total cached runs:      {len(cache.runs)}")
-    logger.info(f"  Cache:                  {cache_file}")
-    logger.info(f"  Parquet cache:          {parquet_file}")
+    logger.info(f"  Cache:                  {cache_file} ({format_file_size(cache_file)})")
+    logger.info(f"  Parquet cache:          {parquet_file} ({format_file_size(parquet_file)})")
+    logger.info(f"  ETag cache:             {etag_cache_file} ({format_file_size(etag_cache_file)})")
 
 
 if __name__ == "__main__":

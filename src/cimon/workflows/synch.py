@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-WORKFLOWS_JSON_FILE_NAME = "workflows.json"
+RESPONSE_JSON_FILE_NAME = "response.json"
 WORKFLOWS_PARQUET_FILE_NAME = "workflows.parquet"
 ETAG_CACHE_FILE_NAME = "etag_cache.json"
 HTTP_NOT_FOUND = 404
@@ -592,7 +592,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     cache_dir = Path(args.cache_dir).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
-    cache_file = str(cache_dir / WORKFLOWS_JSON_FILE_NAME)
+    response_file = str(cache_dir / RESPONSE_JSON_FILE_NAME)
     etag_cache_file = str(cache_dir / ETAG_CACHE_FILE_NAME)
 
     # Entries only get carried over to the next run if they are actually
@@ -714,7 +714,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     runs_to_process = []
 
     new_runs = 0
-    updated_runs = 0
+    known_runs = 0
     cached_completed_runs = 0
 
     for run in runs:
@@ -728,7 +728,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
         else:
             update_run_cache_entry(cached, run)
-            updated_runs += 1
+            known_runs += 1
 
         # --------------------------------------------------------------
         # Completed runs with already cached jobs are immutable for
@@ -794,7 +794,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     cache.runs = list(cached_runs.values())
     cache.updated_at = now_iso()
 
-    save_cache(cache_file, cache)
+    save_cache(response_file, cache)
     merge_parquet_cache(str(parquet_file), cache)
     save_etag_cache(etag_cache_file, etag_cache)
 
@@ -803,15 +803,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     logger.info("Cache update completed.")
-    logger.info(f"  Runs found:             {len(runs)}")
-    logger.info(f"  New runs:               {new_runs}")
-    logger.info(f"  Updated runs:           {updated_runs}")
-    logger.info(f"  Completed runs cached:  {cached_completed_runs}")
-    logger.info(f"  Runs with job update:   {len(runs_to_process)}")
-    logger.info(f"  Total cached runs:      {len(cache.runs)}")
-    logger.info(f"  Cache:                  {cache_file} ({format_file_size(cache_file)})")
-    logger.info(f"  Parquet cache:          {parquet_file} ({format_file_size(parquet_file)})")
-    logger.info(f"  ETag cache:             {etag_cache_file} ({format_file_size(etag_cache_file)})")
+    logger.info(f"  ETag cache:              {etag_cache_file} ({format_file_size(etag_cache_file)})")
+    logger.info(f"  Response:                {response_file} ({format_file_size(response_file)})")
+    logger.info(f"      Runs In Response:    {len(runs)}")
+    logger.info(f"      New Runs:            {new_runs}")
+    logger.info(f"      Known Runs:          {known_runs}")
+    logger.info(f"  Parquet cache:           {parquet_file} ({format_file_size(parquet_file)})")
+    logger.info(f"      Completed:           {cached_completed_runs}")
+    logger.info(f"      Runs With Job Update:{len(runs_to_process)}")
 
 
 if __name__ == "__main__":

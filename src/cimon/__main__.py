@@ -2,16 +2,21 @@
 """CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff."""
 
 import logging
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import click
+import pyarrow.parquet as pq
+import yaml
 
 import requests
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 from cimon.github_api import create_session, print_quota
 from cimon.monitoring.active_jobs import active_jobs
 from cimon.workflows import synch
+from cimon.workflows.query import WorkflowQuery
 
 logger = logging.getLogger(__name__)
 
@@ -146,14 +151,74 @@ def quota(token: str | None, host: str | None) -> None:
 
 
 @main.command(
-    "synch-wf-cache",
+    "sync",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     add_help_option=False,
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def synch_wf_cache(args: tuple[str, ...]) -> None:
+def sync(args: tuple[str, ...]) -> None:
     """Run the workflow-run cache synchronizer."""
     synch.main(list(args))
+
+
+@main.command("query")
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    help="Path to the workflows Parquet cache to filter.",
+)
+@click.option(
+    "-s",
+    "--spec",
+    "spec_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    help="YAML or JSON file describing the filter (see cimon.workflows.query_spec).",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Where to write the filtered rows as a new Parquet file.",
+)
+@click.option(
+    "-c",
+    "--column",
+    "output_columns",
+    multiple=True,
+    help="Restrict the output to this column. Can be given multiple times.",
+)
+def query(
+    input_path: Path,
+    spec_path: Path,
+    output_path: Path,
+    output_columns: tuple[str, ...],
+) -> None:
+    """Filter the workflows Parquet cache with a declarative spec file into a new Parquet file."""
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    workflow_query = WorkflowQuery(input_path).filter_spec(spec)
+    if output_columns:
+        workflow_query = workflow_query.columns(*output_columns)
+
+    table = workflow_query.to_table()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=output_path.parent, prefix=".query_", suffix=".parquet")
+    os.close(fd)
+    try:
+        pq.write_table(table, tmp_path)
+        Path(tmp_path).replace(output_path)
+    finally:
+        if Path(tmp_path).exists():
+            Path(tmp_path).unlink()
+
+    logger.info(f"Wrote {table.num_rows} filtered row(s) to {output_path}")
+
 
 if __name__ == "__main__":
     main()

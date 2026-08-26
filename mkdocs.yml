@@ -18,6 +18,7 @@ nav:
   - Home: README.md
   - References:
     - API: docs/references/api.md
+    - Querying the workflows cache: docs/references/workflow-query.md
 
 extra:
   version:

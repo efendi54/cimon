@@ -11,6 +11,10 @@ The resulting `pyarrow.Table` is a convenient hand-off point for downstream
 visualization or statistics code, e.g. via `table.to_pandas()` or
 `pyarrow.compute` aggregations.
 
+Filters can also be supplied as data instead of Python code via `filter_spec()`,
+see `cimon.workflows.query_spec` for the spec format -- this is how a filter
+can be provided dynamically, e.g. from a CLI flag or a YAML file.
+
 Example:
     ```python
     rows = (
@@ -30,8 +34,10 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.dataset as ds
 
+from cimon.workflows.query_spec import build_expression
+
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
 
@@ -77,6 +83,10 @@ class WorkflowQuery:
         """Keep rows where `column` is not null."""
         return self.filter(ds.field(column).is_valid())
 
+    def filter_spec(self, spec: Mapping[str, Any]) -> WorkflowQuery:
+        """Add a filter described as data (see `cimon.workflows.query_spec`)."""
+        return self.filter(build_expression(spec))
+
     # Domain-specific shortcuts. Kept thin on top of filter()/isin()/between()
     # so adding another one is a one-liner, not a schema change.
 
@@ -95,6 +105,14 @@ class WorkflowQuery:
     def job_name(self, *names: str) -> WorkflowQuery:
         """Keep rows whose job name is any of the given values."""
         return self.isin("job_name", names)
+
+    def job_status(self, *statuses: str) -> WorkflowQuery:
+        """Keep rows whose job status is any of the given values (e.g. "in_progress")."""
+        return self.isin("job_status", statuses)
+
+    def runner_label(self, label: str) -> WorkflowQuery:
+        """Keep rows whose job_runner_labels list contains `label` exactly."""
+        return self.filter_spec({"column": "job_runner_labels", "op": "list_contains", "value": label})
 
     def created_between(self, start: str, end: str) -> WorkflowQuery:
         """Keep runs created within `[start, end]` (ISO 8601 timestamps)."""

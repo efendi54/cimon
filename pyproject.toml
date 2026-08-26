@@ -25,6 +25,11 @@ dependencies = [
 [project.scripts]
 cimon = "cimon.__main__:main"
 
+[project.optional-dependencies]
+pandas = [
+    "pandas>=2.2.0",
+]
+
 [dependency-groups]
 dev = [
 ]

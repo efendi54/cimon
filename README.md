@@ -14,7 +14,7 @@ uv run cimon callgraph -w ~/app-adas-src/.github/workflows/pr.yml
 Example output:
 
 ```mermaid
-flowchart TD;
+flowchart TD
 pr_check_changed_files["check-changed-files"]
 pr_quick_pr_checks["quick-pr-checks"]
 pr_check_changed_files --> pr_quick_pr_checks
@@ -169,3 +169,9 @@ class pr_check_changed_files,pr_quick_pr_checks,pr_build_pr_targets,pr_validate_
 classDef usesNode fill:#ffa500,stroke:#333,color:#000;
 class used____github_workflows_reusable_bazel_build_yml,used____github_workflows_reusable_test_unit_and_sw_yml,used____github_workflows_reusable_test_sol_yml,used____github_workflows_reusable_test_pol_yml,used____github_workflows_reusable_test_sil_yml,used____github_workflows_reusable_test_tools_yml,used____github_workflows_reusable_bazel_smoke_test_yml,used____github_workflows_hmimgr_swe6_tests_yml usesNode;
 ```
+
+
+Note:
+It is usefull to have the following Visual Studio Code Extensions be installed:
+- File Hive (for inspecting e.g. parquet files)
+- Call Graph Explorer (to visualize function callings and function dependencies)

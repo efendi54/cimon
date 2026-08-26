@@ -25,11 +25,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
 import requests
 from cimon.github_api import api_get, create_session, load_etag_cache, save_etag_cache
 from cimon.workflows.models import JobEntry, JobInfo, RunEntry, WorkflowCache, WorkflowInfo
+from cimon.workflows.query import WorkflowQuery
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping
@@ -815,6 +817,23 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     logger.info(f"      Completed:           {cached_completed_runs}")
     logger.info(f"      Runs With Job Update:{len(runs_to_process)}")
 
+    # def test_query(parquet_file: Path) -> None:
+
+    #     table = (
+    #         WorkflowQuery(parquet_file)
+    #         .job_name("Check Changed Files")
+    #         .job_conclusion("success")
+    #         .created_between("2026-08-26T00:00:00Z", "2026-08-31T23:59:59Z")
+    #         .filter(ds.field("job_duration_sec") > 3)      # nur "lange" Builds
+    #         .columns("run_id", "job_duration_sec", "job_runner_name")
+    #         .to_table()
+    #     )
+
+    #     df = table.to_pandas()               # z.B. für Plots
+    #     avg_duration = df["job_duration_sec"].mean()
+    #     logger.info(f"Average job duration for 'Check Changed Files' jobs in August 2026: {avg_duration}")
+
+    # test_query(parquet_file)
 
 if __name__ == "__main__":
     try:

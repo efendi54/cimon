@@ -59,9 +59,13 @@ PARQUET_SCHEMA = pa.schema(
         ("job_id", pa.string()),
         ("job_name", pa.string()),
         ("job_url", pa.string()),
+        ("job_started_at", pa.string()),
+        ("job_completed_at", pa.string()),
         ("job_duration_sec", pa.int64()),
         ("job_status", pa.string()),
         ("job_conclusion", pa.string()),
+        ("job_runner_name", pa.string()),
+        ("job_runner_labels", pa.list_(pa.string())),
     ],
 )
 
@@ -249,9 +253,13 @@ def cache_to_parquet_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "job_id": str(job["id"]) if job.get("id") is not None else None,
                     "job_name": job.get("name"),
                     "job_url": job.get("html_url"),
+                    "job_started_at": job.get("started_at"),
+                    "job_completed_at": job.get("completed_at"),
                     "job_duration_sec": job.get("duration_sec"),
                     "job_status": job.get("status"),
                     "job_conclusion": job.get("conclusion"),
+                    "job_runner_name": job.get("runner_name"),
+                    "job_runner_labels": job.get("runner_labels"),
                 },
             )
 
@@ -287,9 +295,13 @@ def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict
                 "id": int(job_id) if str(job_id).isdigit() else job_id,
                 "name": row.get("job_name"),
                 "html_url": row.get("job_url"),
+                "started_at": row.get("job_started_at"),
+                "completed_at": row.get("job_completed_at"),
                 "duration_sec": row.get("job_duration_sec"),
                 "status": row.get("job_status"),
                 "conclusion": row.get("job_conclusion"),
+                "runner_name": row.get("job_runner_name"),
+                "runner_labels": row.get("job_runner_labels"),
             },
         }
 
@@ -362,9 +374,13 @@ def create_job_cache_entry(job: dict[str, Any]) -> dict[str, Any]:
             "id": job["id"],
             "name": job["name"],
             "html_url": job["html_url"],
+            "started_at": job.get("started_at"),
+            "completed_at": job.get("completed_at"),
             "duration_sec": calculate_job_duration_in_seconds(job),
             "status": job["status"],
             "conclusion": job["conclusion"],
+            "runner_name": job.get("runner_name"),
+            "runner_labels": job.get("labels"),
         },
     }
 

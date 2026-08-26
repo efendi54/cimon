@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 WORKFLOWS_JSON_FILE_NAME = "workflows.json"
 WORKFLOWS_PARQUET_FILE_NAME = "workflows.parquet"
 HTTP_NOT_FOUND = 404
+GITHUB_API_PER_PAGE = 100
 
 PARQUET_SCHEMA = pa.schema(
     [
@@ -109,7 +110,7 @@ def iter_runs(
 
         params = {
             "created": f"{from_date}..{to_date}",
-            "per_page": 100,
+            "per_page": GITHUB_API_PER_PAGE,
             "page": page,
         }
 
@@ -125,6 +126,10 @@ def iter_runs(
             break
 
         yield from runs
+
+        if len(runs) < GITHUB_API_PER_PAGE:
+            break
+
         page += 1
 
 
@@ -144,7 +149,7 @@ def iter_jobs(
             session,
             f"{base_url}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
             params={
-                "per_page": 100,
+                "per_page": GITHUB_API_PER_PAGE,
                 "page": page,
             },
         )
@@ -155,6 +160,10 @@ def iter_jobs(
             break
 
         jobs.extend(page_jobs)
+
+        if len(page_jobs) < GITHUB_API_PER_PAGE:
+            break
+
         page += 1
 
     yield from jobs
@@ -295,6 +304,10 @@ def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict
 
         existing_run_ids.add(str(run_id))
 
+        # A run without cached jobs must still be recognized as "checked",
+        # otherwise runs with genuinely zero jobs get refetched forever.
+        jobs_by_run.setdefault(str(run_id), [])
+
         job_id = row.get("job_id")
         if job_id is None:
             continue
@@ -314,7 +327,7 @@ def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict
             ),
         )
 
-        jobs_by_run.setdefault(str(run_id), []).append(job_entry)
+        jobs_by_run[str(run_id)].append(job_entry)
 
     return existing_run_ids, jobs_by_run
 

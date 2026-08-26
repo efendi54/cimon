@@ -23,11 +23,24 @@ logger = logging.getLogger(__name__)
     default="info",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
 )
-def main(log_level: str) -> None:
+@click.option(
+    "--log-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default="cimon.log",
+    help="Also write log messages to this UTF-8 file. Applies to all cimon commands.",
+)
+def main(log_level: str, log_file: Path | None) -> None:
     """Main entry point for the GitHub Workflow Visualizer CLI."""
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(levelname)s: %(message)s",
+        format="%(asctime)s %(levelname)s: %(message)s",
+        handlers=handlers,
+        force=True,
     )
     logger.info(f"Command line: {' '.join(sys.argv)}")
 

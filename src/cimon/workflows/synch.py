@@ -19,7 +19,7 @@ import os
 import sys
 import tempfile
 import threading
-from collections import ChainMap
+from collections import ChainMap, Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -317,6 +317,89 @@ def load_parquet(path: str) -> list[dict[str, Any]]:
     return pq.read_table(parquet_path).to_pylist()
 
 
+def parquet_cache_overview(path: str) -> dict[str, dict[str, Any]]:
+    """
+    Summarize the Parquet cache per workflow_file.
+
+    Returns a mapping of workflow_file to a dict with the keys
+    "oldest_created_at", "newest_created_at", "status_counts" and
+    "conclusion_counts" (the latter two counted once per run, not per job row).
+    """
+    parquet_path = Path(path)
+    if not parquet_path.exists():
+        return {}
+
+    table = pq.read_table(
+        parquet_path,
+        columns=["workflow_file", "run_id", "created_at", "workflow_status", "workflow_conclusion"],
+    )
+
+    seen_runs: set[tuple[str, str]] = set()
+    overview: dict[str, dict[str, Any]] = {}
+
+    for row in table.to_pylist():
+        workflow_file = row["workflow_file"]
+        run_id = row["run_id"]
+        if workflow_file is None or run_id is None:
+            continue
+
+        # Runs with jobs contribute one row per job; only count each run once.
+        run_key = (workflow_file, run_id)
+        if run_key in seen_runs:
+            continue
+        seen_runs.add(run_key)
+
+        created_at = row["created_at"]
+        entry = overview.setdefault(
+            workflow_file,
+            {
+                "oldest_created_at": created_at,
+                "newest_created_at": created_at,
+                "status_counts": Counter(),
+                "conclusion_counts": Counter(),
+            },
+        )
+
+        if created_at is not None:
+            if entry["oldest_created_at"] is None or created_at < entry["oldest_created_at"]:
+                entry["oldest_created_at"] = created_at
+            if entry["newest_created_at"] is None or created_at > entry["newest_created_at"]:
+                entry["newest_created_at"] = created_at
+
+        entry["status_counts"][row["workflow_status"]] += 1
+        entry["conclusion_counts"][row["workflow_conclusion"]] += 1
+
+    return overview
+
+
+def _format_counts(counts: Counter) -> str:
+    """Format a Counter as a sorted "value=count" list for log output."""
+    return ", ".join(f"{value}={count}" for value, count in sorted(counts.items(), key=lambda item: str(item[0])))
+
+
+def log_parquet_cache_overview(path: str) -> None:
+    """Log the created_at range and status/conclusion breakdown per workflow_file."""
+    overview = parquet_cache_overview(path)
+
+    if not overview:
+        logger.info("      (no cached runs)")
+        return
+
+    for workflow_file, info in sorted(overview.items()):
+        logger.info(f"      {workflow_file}")
+        logger.info(f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}")
+        logger.info(f"          workflow_status:     {_format_counts(info['status_counts'])}")
+        logger.info(f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}")
+
+
+def print_cache_info(cache_dir: Path) -> None:
+    """Log an overview of the Parquet workflow-run cache below the given cache directory."""
+    parquet_file = Path(cache_dir).resolve() / WORKFLOWS_PARQUET_FILE_NAME
+
+    logger.info(f"Parquet cache: {parquet_file} ({format_file_size(parquet_file)})")
+    log_parquet_cache_overview(str(parquet_file))
+
+
 def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict[str, list[JobEntry]]]:
     """Build a run index and reusable job snapshots from Parquet rows."""
     existing_run_ids = set()
@@ -565,7 +648,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         "--cache-dir",
         default=Path.home() / ".cache/cimon",
         type=Path,
-        help="Directory where workflows.json and workflows.parquet are written.",
+        help="Directory where caching related files will be written into.",
     )
 
     args = parser.parse_args(argv)
@@ -720,7 +803,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     new_runs = 0
     known_runs = 0
-    cached_completed_runs = 0
+    completed_runs_in_response = 0
 
     for run in runs:
         run_id = str(run["id"])
@@ -729,7 +812,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
         if run_id not in existing_run_ids:
             new_runs += 1
-            logger.info(f"Caching new workflow run {run_id}")
+            logger.debug(f"Caching new workflow run {run_id}")
 
         else:
             update_run_cache_entry(cached, run)
@@ -743,7 +826,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         if run["status"] == "completed" and run_id in cached_jobs_by_run:
             cached.jobs = cached_jobs_by_run[run_id]
             cached.jobs_cached_at = now_iso()
-            cached_completed_runs += 1
+            completed_runs_in_response += 1
             continue
 
         # --------------------------------------------------------------
@@ -808,14 +891,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     logger.info("Cache update completed.")
-    logger.info(f"  ETag cache:              {etag_cache_file} ({format_file_size(etag_cache_file)})")
-    logger.info(f"  Response:                {response_file} ({format_file_size(response_file)})")
-    logger.info(f"      Runs In Response:    {len(runs)}")
-    logger.info(f"      New Runs:            {new_runs}")
-    logger.info(f"      Known Runs:          {known_runs}")
-    logger.info(f"  Parquet cache:           {parquet_file} ({format_file_size(parquet_file)})")
-    logger.info(f"      Completed:           {cached_completed_runs}")
-    logger.info(f"      Runs With Job Update:{len(runs_to_process)}")
+    logger.info(f"ETag cache:   {etag_cache_file} ({format_file_size(etag_cache_file)})")
+    logger.info(f"GH Response:  {response_file} ({format_file_size(response_file)})")
+    logger.info(f"    Runs:     {len(runs)} ({new_runs} new, {known_runs} known)")
+    logger.info(f"Cache:        {parquet_file} ({format_file_size(parquet_file)})")
+    log_parquet_cache_overview(str(parquet_file))
 
     # def test_query(parquet_file: Path) -> None:
 

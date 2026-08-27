@@ -11,3 +11,6 @@ all:
   - column: workflow_file
     op: contains
     value: "qg_cas_build_and_test.yml"
+  - column: workflow_status
+    op: eq
+    value: "completed"

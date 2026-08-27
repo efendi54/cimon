@@ -161,6 +161,18 @@ def sync(args: tuple[str, ...]) -> None:
     synch.main(list(args))
 
 
+@main.command("cache-info")
+@click.option(
+    "--cache-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.home() / ".cache/cimon",
+    help="Directory where caching related files are stored.",
+)
+def cache_info(cache_dir: Path) -> None:
+    """Show the current workflow-run Parquet cache: per workflow_file created_at range, status and conclusion counts."""
+    synch.print_cache_info(cache_dir)
+
+
 @main.command("query")
 @click.option(
     "-i",

@@ -61,6 +61,7 @@ PARQUET_SCHEMA = pa.schema(
         ("workflow_file", pa.string()),
         ("run_id", pa.string()),
         ("run_number", pa.int64()),
+        ("run_attempt", pa.int64()),
         ("workflow_run_url", pa.string()),
         ("workflow_status", pa.string()),
         ("workflow_conclusion", pa.string()),
@@ -69,6 +70,7 @@ PARQUET_SCHEMA = pa.schema(
         ("job_id", pa.string()),
         ("job_name", pa.string()),
         ("job_url", pa.string()),
+        ("job_run_attempt", pa.int64()),
         ("job_started_at", pa.string()),
         ("job_completed_at", pa.string()),
         ("job_duration_sec", pa.int64()),
@@ -236,7 +238,7 @@ def iter_jobs(
     run_id: int | str,
     etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Fetch all jobs associated with a workflow run."""
+    """Fetch all jobs associated with a workflow run, across all run attempts."""
     jobs = []
     page = 1
 
@@ -245,6 +247,9 @@ def iter_jobs(
             session,
             f"{base_url}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
             params={
+                # "all" (vs. the API default "latest") includes jobs from
+                # earlier, retried attempts, not just the current one.
+                "filter": "all",
                 "per_page": GITHUB_API_PER_PAGE,
                 "page": page,
             },
@@ -348,6 +353,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
             "workflow_file": workflow.file if workflow else None,
             "run_id": str(run.run_id),
             "run_number": run.run_number,
+            "run_attempt": run.run_attempt,
             "workflow_run_url": run.workflow_run_url,
             "workflow_status": run.workflow_status,
             "workflow_conclusion": run.workflow_conclusion,
@@ -362,6 +368,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_id": None,
                     "job_name": None,
                     "job_url": None,
+                    "job_run_attempt": None,
                     "job_started_at": None,
                     "job_completed_at": None,
                     "job_duration_sec": None,
@@ -381,6 +388,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_id": str(job.id),
                     "job_name": job.name,
                     "job_url": job.html_url,
+                    "job_run_attempt": job.run_attempt,
                     "job_started_at": job.started_at,
                     "job_completed_at": job.completed_at,
                     "job_duration_sec": job.duration_sec,
@@ -510,6 +518,7 @@ def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict
                 id=int(job_id) if str(job_id).isdigit() else 0,
                 name=row.get("job_name"),
                 html_url=row.get("job_url"),
+                run_attempt=row.get("job_run_attempt"),
                 started_at=row.get("job_started_at"),
                 completed_at=row.get("job_completed_at"),
                 duration_sec=row.get("job_duration_sec"),
@@ -583,6 +592,7 @@ def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
     return RunEntry(
         run_id=run["id"],
         run_number=run["run_number"],
+        run_attempt=run.get("run_attempt"),
         workflow_run_url=run["html_url"],
         workflow_status=run["status"],
         workflow_conclusion=run["conclusion"],
@@ -598,6 +608,7 @@ def create_job_cache_entry(job: dict[str, Any]) -> JobEntry:
             id=job["id"],
             name=job["name"],
             html_url=job["html_url"],
+            run_attempt=job.get("run_attempt"),
             started_at=job.get("started_at"),
             completed_at=job.get("completed_at"),
             duration_sec=calculate_job_duration_in_seconds(job),
@@ -650,6 +661,7 @@ def update_run_cache_entry(
     Job information is intentionally not modified here.
     """
     cached.run_number = run["run_number"]
+    cached.run_attempt = run.get("run_attempt")
     cached.workflow_run_url = run["html_url"]
     cached.workflow_status = run["status"]
     cached.workflow_conclusion = run["conclusion"]

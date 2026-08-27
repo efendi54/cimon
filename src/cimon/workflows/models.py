@@ -12,6 +12,7 @@ class JobInfo(BaseModel):
     id: int
     name: str
     html_url: str
+    run_attempt: int | None = None
     started_at: str | None = None
     completed_at: str | None = None
     duration_sec: int | None = None
@@ -32,6 +33,7 @@ class RunEntry(BaseModel):
 
     run_id: int
     run_number: int
+    run_attempt: int | None = None
     workflow_run_url: str
     workflow_status: str
     workflow_conclusion: str | None = None

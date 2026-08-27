@@ -36,10 +36,8 @@ class RunEntry(BaseModel):
     workflow_status: str
     workflow_conclusion: str | None = None
     created_at: str
-    cached_at: str
-    updated_at: str
+    cache_updated_at: str
     jobs: list[JobEntry] = Field(default_factory=list)
-    jobs_cached_at: str | None = None
 
 
 class WorkflowInfo(BaseModel):

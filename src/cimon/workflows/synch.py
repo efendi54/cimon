@@ -44,6 +44,12 @@ WORKFLOWS_PARQUET_FILE_NAME = "workflows.parquet"
 ETAG_CACHE_FILE_NAME = "etag_cache.json"
 HTTP_NOT_FOUND = 404
 GITHUB_API_PER_PAGE = 100
+# GitHub's REST API never returns more than this many results for a single
+# list query, no matter how many pages are requested (offset/limit truncation).
+GITHUB_API_RESULT_CAP = 1000
+# Job-level statuses that mean a run is still active, used for the
+# date-independent "active runs" scan (see iter_runs_by_status).
+ACTIVE_RUN_STATUSES = ("in_progress", "queued")
 
 PARQUET_SCHEMA = pa.schema(
     [
@@ -59,9 +65,7 @@ PARQUET_SCHEMA = pa.schema(
         ("workflow_status", pa.string()),
         ("workflow_conclusion", pa.string()),
         ("created_at", pa.string()),
-        ("cached_at", pa.string()),
-        ("updated_at", pa.string()),
-        ("jobs_cached_at", pa.string()),
+        ("cache_updated_at", pa.string()),
         ("job_id", pa.string()),
         ("job_name", pa.string()),
         ("job_url", pa.string()),
@@ -92,6 +96,55 @@ def workflow_info(
     ).json()
 
 
+def _iter_run_pages(
+    session: requests.Session,
+    url: str,
+    base_params: dict[str, Any],
+    max_pages: int | None,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None,
+    context: str,
+) -> Iterator[dict]:
+    """
+    Page through a GitHub workflow-runs listing.
+
+    Warns and stops once GitHub's ~1000-result pagination cap is hit, since
+    further pages would come back empty even though more runs may exist.
+    """
+    page = 1
+    total = 0
+
+    while True:
+        if max_pages and page > max_pages:
+            break
+
+        params = {**base_params, "per_page": GITHUB_API_PER_PAGE, "page": page}
+
+        response = api_get(session, url, params=params, etag_cache=etag_cache)
+        runs = response.json()["workflow_runs"]
+
+        if not runs:
+            break
+
+        yield from runs
+        total += len(runs)
+
+        if len(runs) < GITHUB_API_PER_PAGE:
+            break
+
+        if total >= GITHUB_API_RESULT_CAP:
+            logger.warning(
+                "Reached GitHub's %s-result pagination cap while fetching %s. "
+                "Older/earlier runs in this window may be unreachable -- narrow "
+                "the query (--from-date/--to-date accept hour/minute-precision "
+                "timestamps) and re-run to pick them up.",
+                GITHUB_API_RESULT_CAP,
+                context,
+            )
+            break
+
+        page += 1
+
+
 def iter_runs(
     session: requests.Session,
     base_url: str,
@@ -109,36 +162,70 @@ def iter_runs(
     No workflow status or conclusion filter is applied here.
     The cache always receives all workflow runs.
     """
-    page = 1
+    url = f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
+    context = f"workflow {workflow_id} runs created {from_date}..{to_date}"
 
-    while True:
-        if max_pages and page > max_pages:
-            break
+    yield from _iter_run_pages(
+        session,
+        url,
+        {"created": f"{from_date}..{to_date}"},
+        max_pages,
+        etag_cache,
+        context,
+    )
 
-        params = {
-            "created": f"{from_date}..{to_date}",
-            "per_page": GITHUB_API_PER_PAGE,
-            "page": page,
-        }
 
-        response = api_get(
-            session,
-            f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
-            params=params,
-            etag_cache=etag_cache,
-        )
+def iter_runs_by_status(
+    session: requests.Session,
+    base_url: str,
+    owner: str,
+    repo: str,
+    workflow_id: int | str,
+    status: str,
+    max_pages: int | None = None,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
+) -> Iterator[dict]:
+    """
+    Fetch all workflow runs currently in the given status, regardless of created date.
 
-        runs = response.json()["workflow_runs"]
+    Used to refresh runs that are genuinely still active but whose created_at
+    falls outside the pagination-reachable part of a busy day's date-range query.
+    """
+    url = f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
+    context = f"workflow {workflow_id} runs with status={status}"
 
-        if not runs:
-            break
+    yield from _iter_run_pages(session, url, {"status": status}, max_pages, etag_cache, context)
 
-        yield from runs
 
-        if len(runs) < GITHUB_API_PER_PAGE:
-            break
+def scan_active_runs(
+    session: requests.Session,
+    base_url: str,
+    owner: str,
+    repo: str,
+    workflow_id: int | str,
+    known_run_ids: set[str],
+    max_pages: int | None = None,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
+) -> list[dict]:
+    """
+    Fetch currently active runs (see ACTIVE_RUN_STATUSES) not already in `known_run_ids`.
 
-        page += 1
+    Extends `known_run_ids` in place with the IDs of any runs found.
+    """
+    active_runs = []
+
+    for status in ACTIVE_RUN_STATUSES:
+        for run in iter_runs_by_status(
+            session, base_url, owner, repo, workflow_id, status, max_pages, etag_cache=etag_cache,
+        ):
+            run_id = str(run["id"])
+            if run_id in known_run_ids:
+                continue
+
+            known_run_ids.add(run_id)
+            active_runs.append(run)
+
+    return active_runs
 
 
 def iter_jobs(
@@ -265,9 +352,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
             "workflow_status": run.workflow_status,
             "workflow_conclusion": run.workflow_conclusion,
             "created_at": run.created_at,
-            "cached_at": run.cached_at,
-            "updated_at": run.updated_at,
-            "jobs_cached_at": run.jobs_cached_at,
+            "cache_updated_at": run.cache_updated_at,
         }
 
         if not run.jobs:
@@ -495,7 +580,6 @@ def create_workflow_cache_entry(
 
 def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
     """Create a cache entry for a workflow run."""
-    timestamp = now_iso()
     return RunEntry(
         run_id=run["id"],
         run_number=run["run_number"],
@@ -503,8 +587,7 @@ def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
         workflow_status=run["status"],
         workflow_conclusion=run["conclusion"],
         created_at=run["created_at"],
-        cached_at=timestamp,
-        updated_at=timestamp,
+        cache_updated_at=now_iso(),
     )
 
 
@@ -571,7 +654,30 @@ def update_run_cache_entry(
     cached.workflow_status = run["status"]
     cached.workflow_conclusion = run["conclusion"]
     cached.created_at = run["created_at"]
-    cached.updated_at = now_iso()
+    cached.cache_updated_at = now_iso()
+
+
+def _parse_date_boundary(value: str) -> str:
+    """
+    Validate a --from-date/--to-date value.
+
+    Accepts a plain date (YYYY-MM-DD) or a full ISO-8601 timestamp
+    (YYYY-MM-DDTHH:MM:SS[Z|+HH:MM]) for hour/minute-precision date ranges,
+    passed straight through to GitHub's "created" query filter unchanged.
+    """
+    try:
+        dt.date.fromisoformat(value)
+    except ValueError:
+        try:
+            dt.datetime.fromisoformat(value.removesuffix("Z"))
+        except ValueError:
+            msg = (
+                f"Invalid date/time {value!r}, expected YYYY-MM-DD or an ISO-8601 "
+                "timestamp (e.g. 2026-08-25T08:00:00Z)"
+            )
+            raise argparse.ArgumentTypeError(msg) from None
+
+    return value
 
 
 def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
@@ -621,13 +727,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     parser.add_argument(
         "--from-date",
         default=today,
-        help="Start date (YYYY-MM-DD)",
+        type=_parse_date_boundary,
+        help="Start of the created-at filter: YYYY-MM-DD, or an ISO-8601 "
+        "timestamp (e.g. 2026-08-25T08:00:00Z) for hour/minute precision -- "
+        "useful to stay under GitHub's 1000-result pagination cap on busy days",
     )
 
     parser.add_argument(
         "--to-date",
         default=today,
-        help="End date (YYYY-MM-DD)",
+        type=_parse_date_boundary,
+        help="End of the created-at filter: YYYY-MM-DD, or an ISO-8601 "
+        "timestamp (e.g. 2026-08-25T12:00:00Z) for hour/minute precision",
     )
 
     parser.add_argument(
@@ -796,6 +907,34 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     sys.stdout.flush()
 
     # ------------------------------------------------------------------
+    # Active-run scan
+    #
+    # Date-range queries on busy days can silently truncate at GitHub's
+    # 1000-result pagination cap, burying older-but-still-active runs out of
+    # reach. This date-independent scan for genuinely active runs catches
+    # those regardless of when they were created.
+    # ------------------------------------------------------------------
+
+    known_run_ids = {str(run["id"]) for run in runs}
+    active_runs = scan_active_runs(
+        session,
+        base_url,
+        args.owner,
+        args.repo,
+        workflow["id"],
+        known_run_ids,
+        args.max_pages,
+        etag_cache=etag_cache_view,
+    )
+
+    if active_runs:
+        logger.info(
+            f"Active-run scan found {len(active_runs)} additional run(s) "
+            "outside the requested date range",
+        )
+        runs.extend(active_runs)
+
+    # ------------------------------------------------------------------
     # Update workflow-run cache
     # ------------------------------------------------------------------
 
@@ -825,7 +964,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
         if run["status"] == "completed" and run_id in cached_jobs_by_run:
             cached.jobs = cached_jobs_by_run[run_id]
-            cached.jobs_cached_at = now_iso()
+            cached.cache_updated_at = now_iso()
             completed_runs_in_response += 1
             continue
 
@@ -871,7 +1010,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                 # cache updates.
 
                 cached.jobs = jobs
-                cached.jobs_cached_at = now_iso()
+                cached.cache_updated_at = now_iso()
 
                 logger.debug(f"Updated {len(jobs)} jobs for workflow run {run_id}")
 

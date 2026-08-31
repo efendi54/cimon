@@ -2,19 +2,18 @@
 """CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff."""
 
 import logging
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 import click
-import pyarrow.parquet as pq
 import yaml
 
 import requests
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 from cimon.github_api import create_session, print_quota
 from cimon.monitoring.active_jobs import active_jobs
+from cimon.parquet_io import write_table_atomic
+from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
 from cimon.workflows.query import WorkflowQuery
 
@@ -218,18 +217,56 @@ def query(
         workflow_query = workflow_query.columns(*output_columns)
 
     table = workflow_query.to_table()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(dir=output_path.parent, prefix=".query_", suffix=".parquet")
-    os.close(fd)
-    try:
-        pq.write_table(table, tmp_path)
-        Path(tmp_path).replace(output_path)
-    finally:
-        if Path(tmp_path).exists():
-            Path(tmp_path).unlink()
+    write_table_atomic(table, output_path)
 
     logger.info(f"Wrote {table.num_rows} filtered row(s) to {output_path}")
+
+
+@main.command("visualize")
+@click.argument("name", required=False)
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    help="Path to the workflows Parquet cache to filter.",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    "output_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("./out/visualizations"),
+    help="""Directory to write the filtered Parquet file (and any rendered output) into.""",
+)
+@click.option(
+    "-l",
+    "--list",
+    "list_only",
+    is_flag=True,
+    help="List the registered visualization names and exit.",
+)
+def visualize(name: str | None, input_path: Path | None, output_dir: Path, *, list_only: bool) -> None:
+    """Filter the workflows Parquet cache per a registered visualization's spec, then render it.
+
+    See cimon.visualization.registry for the list of registered visualizations
+    and how to add new ones.
+    """
+    if list_only:
+        click.echo("\n".join(registry.available()))
+        return
+
+    if not name:
+        msg = "Missing argument 'NAME'. Use --list to see available visualizations."
+        raise click.UsageError(msg)
+    if not input_path:
+        msg = "Missing option '-i' / '--input'."
+        raise click.UsageError(msg)
+
+    try:
+        pipeline.run(name, input_path, output_dir)
+    except KeyError as exc:
+        raise click.UsageError(str(exc)) from None
 
 
 if __name__ == "__main__":

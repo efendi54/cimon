@@ -1,0 +1,8 @@
+# Adjust the `between` range below to the time span you want to inspect.
+all:
+  - column: job_runner_labels
+    op: list_contains
+    value: "app-adas-src"
+  - column: created_at
+    op: between
+    value: ["2026-08-31T00:00:00Z", "2026-08-31T23:59:59Z"]

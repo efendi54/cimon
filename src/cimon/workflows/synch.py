@@ -479,10 +479,10 @@ def log_parquet_cache_overview(path: str) -> None:
         return
 
     for workflow_file, info in sorted(overview.items()):
-        logger.info(f"      {workflow_file}")
-        logger.info(f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}")
-        logger.info(f"          workflow_status:     {_format_counts(info['status_counts'])}")
-        logger.info(f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}")
+        logger.info(f"      {workflow_file} ({sum(info['status_counts'].values())} RUNS)")
+        logger.debug(f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}")
+        logger.debug(f"          workflow_status:     {_format_counts(info['status_counts'])}")
+        logger.debug(f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}")
 
 
 def print_cache_info(cache_dir: Path) -> None:

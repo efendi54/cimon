@@ -29,6 +29,11 @@ cimon = "cimon.__main__:main"
 pandas = [
     "pandas>=2.2.0",
 ]
+viz = [
+    "duckdb>=1.5.5",
+    "pandas>=2.3.3",
+    "plotly>=7.0.0",
+]
 
 [dependency-groups]
 dev = [

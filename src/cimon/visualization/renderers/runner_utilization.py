@@ -69,6 +69,11 @@ def render(table: pa.Table, output_dir: Path) -> None:
         color="labels",
         title="Runner occupancy over time per runner-label-list",
         labels={"bucket": "time", "active_runner_count": "active runners", "labels": "job_runner_labels"},
+        color_discrete_sequence=px.colors.qualitative.Dark24,
+        markers=True,
     )
+    # Higher contrast against the plot background: bolder lines/markers, light-gray plot area.
+    figure.update_traces(line={"width": 3}, marker={"size": 7, "line": {"width": 1, "color": "black"}})
+    figure.update_layout(plot_bgcolor="#e5e5e5")
     figure.write_html(output_path)
     logger.info(f"Wrote {output_path}")

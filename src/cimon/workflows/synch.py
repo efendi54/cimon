@@ -74,6 +74,7 @@ PARQUET_SCHEMA = pa.schema(
         ("job_started_at", pa.string()),
         ("job_completed_at", pa.string()),
         ("job_duration_sec", pa.int64()),
+        ("job_active_duration_sec", pa.int64()),
         ("job_status", pa.string()),
         ("job_conclusion", pa.string()),
         ("job_runner_name", pa.string()),
@@ -286,6 +287,28 @@ def calculate_job_duration_in_seconds(job: dict[str, Any]) -> int | None:
     return int((end - start).total_seconds())
 
 
+def calculate_job_active_duration_in_seconds(job: JobInfo, as_of: str) -> int | None:
+    """Time the job has been running as of `as_of`; equals `duration_sec` once completed.
+
+    Computed against `as_of` (the sync's own `cache_updated_at`, i.e. when the
+    job was actually observed) rather than wall-clock "now" at read time, so
+    the value stays accurate even if it's read long after a stale cache's
+    last sync.
+    """
+    if job.duration_sec is not None:
+        return job.duration_sec
+
+    if not job.started_at:
+        return None
+
+    start = dt.datetime.strptime(
+        job.started_at, "%Y-%m-%dT%H:%M:%SZ",
+    ).replace(tzinfo=dt.timezone.utc)
+    observed_at = dt.datetime.fromisoformat(as_of)
+
+    return int((observed_at - start).total_seconds())
+
+
 def now_iso() -> str:
     """Return the current UTC time in ISO 8601 format."""
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -372,6 +395,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_started_at": None,
                     "job_completed_at": None,
                     "job_duration_sec": None,
+                    "job_active_duration_sec": None,
                     "job_status": None,
                     "job_conclusion": None,
                     "job_runner_name": None,
@@ -392,6 +416,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_started_at": job.started_at,
                     "job_completed_at": job.completed_at,
                     "job_duration_sec": job.duration_sec,
+                    "job_active_duration_sec": calculate_job_active_duration_in_seconds(job, run.cache_updated_at),
                     "job_status": job.status,
                     "job_conclusion": job.conclusion,
                     "job_runner_name": job.runner_name,

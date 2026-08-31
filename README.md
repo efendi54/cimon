@@ -318,7 +318,7 @@ Currently registered:
 | Name | Spec | What it shows |
 |---|---|---|
 | `runner-utilization` | [`runner_utilization.yml`](src/cimon/visualization/specs/runner_utilization.yml) | number of concurrently active runners over time, per exact `job_runner_labels` combination |
-| `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed, successful jobs -- one HTML page per workflow |
+| `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed (successful) or still-running jobs -- one HTML page per workflow |
 
 ### Adding a new visualization
 
@@ -332,13 +332,17 @@ full spec syntax):
 
 ```yaml
 # src/cimon/visualization/specs/job_durations.yml
-all:
+any:
+  - all:
+      - column: job_status
+        op: eq
+        value: completed
+      - column: job_conclusion
+        op: eq
+        value: success
   - column: job_status
     op: eq
-    value: completed
-  - column: job_conclusion
-    op: eq
-    value: success
+    value: in_progress
 ```
 
 **2. Write a render function** -- it takes the already-filtered `pa.Table`
@@ -353,13 +357,13 @@ def render(table: pa.Table, output_dir: Path) -> None:
     con.register("jobs", table)
     frame = con.execute("""
         SELECT workflow_name, workflow_file, job_name,
-               cast(created_at AS TIMESTAMPTZ) AS created_at, job_duration_sec
+               cast(created_at AS TIMESTAMPTZ) AS created_at, job_active_duration_sec
         FROM jobs
-        WHERE job_duration_sec IS NOT NULL
+        WHERE job_active_duration_sec IS NOT NULL
     """).df()
 
     for workflow_file, group in frame.groupby("workflow_file"):
-        figure = px.scatter(group, x="created_at", y="job_duration_sec", color="job_name")
+        figure = px.scatter(group, x="created_at", y="job_active_duration_sec", color="job_name")
         figure.write_html(output_dir / "job-durations" / f"{workflow_file}.html")
 ```
 

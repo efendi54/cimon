@@ -27,7 +27,15 @@ Each row is one **job** belonging to one **run**. Run-level columns
 (`run_id`, `workflow_status`, `workflow_conclusion`, `created_at`, ...) repeat
 across every job row of the same run; job-level columns (`job_id`,
 `job_name`, `job_status`, `job_conclusion`, `job_duration_sec`,
-`job_runner_name`, `job_runner_labels`, ...) describe that specific job.
+`job_active_duration_sec`, `job_runner_name`, `job_runner_labels`, ...)
+describe that specific job.
+
+`job_duration_sec` is only set once a job has `completed_at` (its final
+duration). `job_active_duration_sec` is set as soon as a job has started: it
+equals `job_duration_sec` once completed, and for a still-running job it's
+the time elapsed between `job_started_at` and that sync's own
+`cache_updated_at` -- not "now", so it stays accurate even if read long after
+a stale cache's last sync.
 
 A filter on `job_status`/`job_runner_labels` therefore matches individual job
 rows, not automatically every other job of the same run -- a run can well be

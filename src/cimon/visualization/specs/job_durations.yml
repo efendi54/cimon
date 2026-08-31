@@ -1,7 +1,11 @@
-all:
+any:
+  - all:
+      - column: job_status
+        op: eq
+        value: completed
+      - column: job_conclusion
+        op: eq
+        value: success
   - column: job_status
     op: eq
-    value: completed
-  - column: job_conclusion
-    op: eq
-    value: success
+    value: in_progress

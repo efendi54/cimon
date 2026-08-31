@@ -11,7 +11,6 @@ import yaml
 import requests
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 from cimon.github_api import create_session, print_quota
-from cimon.monitoring.active_jobs import active_jobs
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
@@ -107,12 +106,6 @@ def callgraph(
 
     callgraph_mode = MermaidCallGraphMode.DEEP if deep else MermaidCallGraphMode.SHALLOW
     generate_mermaid_graph(wf_path=Path(workflow_path), out_path=output_folder, callgraph_mode=callgraph_mode)
-
-@main.command()
-def jobmon() -> None:
-    """Showing actively running jobs in the CI."""
-    logger.debug("Job monitoring is not yet implemented.")
-    active_jobs()
 
 
 @main.command()

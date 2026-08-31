@@ -3,6 +3,9 @@ all:
   - column: job_runner_labels
     op: list_contains
     value: "app-adas-src"
+  - column: job_status
+    op: eq
+    value: "in_progress"
   - column: created_at
     op: between
     value: ["2026-08-31T00:00:00Z", "2026-08-31T23:59:59Z"]

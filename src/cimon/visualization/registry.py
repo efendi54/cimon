@@ -70,10 +70,24 @@ def _render_runner_utilization(table: pa.Table, output_dir: Path) -> None:
     render(table, output_dir)
 
 
+def _render_job_durations(table: pa.Table, output_dir: Path) -> None:
+    from cimon.visualization.renderers.job_durations import render  # noqa: PLC0415
+
+    render(table, output_dir)
+
+
 register(
     Visualization(
         name="runner-utilization",
         spec_path=SPECS_DIR / "runner_utilization.yml",
         render=_render_runner_utilization,
+    ),
+)
+
+register(
+    Visualization(
+        name="job-durations",
+        spec_path=SPECS_DIR / "job_durations.yml",
+        render=_render_job_durations,
     ),
 )

@@ -67,7 +67,7 @@ def render(table: pa.Table, output_dir: Path) -> None:
         x="bucket",
         y="active_runner_count",
         color="labels",
-        title="Runner occupancy over time",
+        title="Runner occupancy over time per runner-label-list",
         labels={"bucket": "time", "active_runner_count": "active runners", "labels": "job_runner_labels"},
     )
     figure.write_html(output_path)

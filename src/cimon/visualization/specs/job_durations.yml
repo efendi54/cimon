@@ -1,0 +1,7 @@
+all:
+  - column: job_status
+    op: eq
+    value: completed
+  - column: job_conclusion
+    op: eq
+    value: success

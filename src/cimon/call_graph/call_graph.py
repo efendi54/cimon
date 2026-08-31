@@ -38,7 +38,7 @@ def generate_mermaid_graph(
 ) -> None:
     """Generates a Mermaid call graph for the given workflow file."""
     lines = [f"# [{wf_path.name}]({blob_url}{wf_path})"]
-    lines.extend(["```mermaid", "flowchart TD;"])
+    lines.extend(["```mermaid", "flowchart TD"])
 
     callgraph_lines = build_graph(
         path=wf_path.resolve(),

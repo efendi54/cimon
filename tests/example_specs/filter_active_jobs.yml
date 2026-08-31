@@ -1,0 +1,7 @@
+all:
+  - column: job_status
+    op: eq
+    value: "in_progress"
+  - column: job_runner_labels
+    op: list_contains
+    value: "app-adas-src"

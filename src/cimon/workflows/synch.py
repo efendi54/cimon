@@ -27,10 +27,16 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
-
 import requests
+
 from cimon.github_api import api_get, create_session, load_etag_cache, save_etag_cache
-from cimon.workflows.models import JobEntry, JobInfo, RunEntry, WorkflowCache, WorkflowInfo
+from cimon.workflows.models import (
+    JobEntry,
+    JobInfo,
+    RunEntry,
+    WorkflowCache,
+    WorkflowInfo,
+)
 from cimon.workflows.query import WorkflowQuery
 
 if TYPE_CHECKING:
@@ -197,7 +203,9 @@ def iter_runs_by_status(
     url = f"{base_url}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
     context = f"workflow {workflow_id} runs with status={status}"
 
-    yield from _iter_run_pages(session, url, {"status": status}, max_pages, etag_cache, context)
+    yield from _iter_run_pages(
+        session, url, {"status": status}, max_pages, etag_cache, context
+    )
 
 
 def scan_active_runs(
@@ -219,7 +227,14 @@ def scan_active_runs(
 
     for status in ACTIVE_RUN_STATUSES:
         for run in iter_runs_by_status(
-            session, base_url, owner, repo, workflow_id, status, max_pages, etag_cache=etag_cache,
+            session,
+            base_url,
+            owner,
+            repo,
+            workflow_id,
+            status,
+            max_pages,
+            etag_cache=etag_cache,
         ):
             run_id = str(run["id"])
             if run_id in known_run_ids:
@@ -278,10 +293,12 @@ def calculate_job_duration_in_seconds(job: dict[str, Any]) -> int | None:
         return None
 
     start = dt.datetime.strptime(
-        job["started_at"], "%Y-%m-%dT%H:%M:%SZ",
+        job["started_at"],
+        "%Y-%m-%dT%H:%M:%SZ",
     ).replace(tzinfo=dt.timezone.utc)
     end = dt.datetime.strptime(
-        job["completed_at"], "%Y-%m-%dT%H:%M:%SZ",
+        job["completed_at"],
+        "%Y-%m-%dT%H:%M:%SZ",
     ).replace(tzinfo=dt.timezone.utc)
 
     return int((end - start).total_seconds())
@@ -302,7 +319,8 @@ def calculate_job_active_duration_in_seconds(job: JobInfo, as_of: str) -> int | 
         return None
 
     start = dt.datetime.strptime(
-        job.started_at, "%Y-%m-%dT%H:%M:%SZ",
+        job.started_at,
+        "%Y-%m-%dT%H:%M:%SZ",
     ).replace(tzinfo=dt.timezone.utc)
     observed_at = dt.datetime.fromisoformat(as_of)
 
@@ -416,7 +434,9 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_started_at": job.started_at,
                     "job_completed_at": job.completed_at,
                     "job_duration_sec": job.duration_sec,
-                    "job_active_duration_sec": calculate_job_active_duration_in_seconds(job, run.cache_updated_at),
+                    "job_active_duration_sec": calculate_job_active_duration_in_seconds(
+                        job, run.cache_updated_at
+                    ),
                     "job_status": job.status,
                     "job_conclusion": job.conclusion,
                     "job_runner_name": job.runner_name,
@@ -449,7 +469,13 @@ def parquet_cache_overview(path: str) -> dict[str, dict[str, Any]]:
 
     table = pq.read_table(
         parquet_path,
-        columns=["workflow_file", "run_id", "created_at", "workflow_status", "workflow_conclusion"],
+        columns=[
+            "workflow_file",
+            "run_id",
+            "created_at",
+            "workflow_status",
+            "workflow_conclusion",
+        ],
     )
 
     seen_runs: set[tuple[str, str]] = set()
@@ -479,9 +505,15 @@ def parquet_cache_overview(path: str) -> dict[str, dict[str, Any]]:
         )
 
         if created_at is not None:
-            if entry["oldest_created_at"] is None or created_at < entry["oldest_created_at"]:
+            if (
+                entry["oldest_created_at"] is None
+                or created_at < entry["oldest_created_at"]
+            ):
                 entry["oldest_created_at"] = created_at
-            if entry["newest_created_at"] is None or created_at > entry["newest_created_at"]:
+            if (
+                entry["newest_created_at"] is None
+                or created_at > entry["newest_created_at"]
+            ):
                 entry["newest_created_at"] = created_at
 
         entry["status_counts"][row["workflow_status"]] += 1
@@ -492,7 +524,10 @@ def parquet_cache_overview(path: str) -> dict[str, dict[str, Any]]:
 
 def _format_counts(counts: Counter) -> str:
     """Format a Counter as a sorted "value=count" list for log output."""
-    return ", ".join(f"{value}={count}" for value, count in sorted(counts.items(), key=lambda item: str(item[0])))
+    return ", ".join(
+        f"{value}={count}"
+        for value, count in sorted(counts.items(), key=lambda item: str(item[0]))
+    )
 
 
 def log_parquet_cache_overview(path: str) -> None:
@@ -504,10 +539,18 @@ def log_parquet_cache_overview(path: str) -> None:
         return
 
     for workflow_file, info in sorted(overview.items()):
-        logger.info(f"      {workflow_file} ({sum(info['status_counts'].values())} RUNS)")
-        logger.debug(f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}")
-        logger.debug(f"          workflow_status:     {_format_counts(info['status_counts'])}")
-        logger.debug(f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}")
+        logger.info(
+            f"      {workflow_file} ({sum(info['status_counts'].values())} RUNS)"
+        )
+        logger.debug(
+            f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}"
+        )
+        logger.debug(
+            f"          workflow_status:     {_format_counts(info['status_counts'])}"
+        )
+        logger.debug(
+            f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}"
+        )
 
 
 def print_cache_info(cache_dir: Path) -> None:
@@ -518,7 +561,9 @@ def print_cache_info(cache_dir: Path) -> None:
     log_parquet_cache_overview(str(parquet_file))
 
 
-def cached_jobs_from_parquet(rows: list[dict[str, Any]]) -> tuple[set[str], dict[str, list[JobEntry]]]:
+def cached_jobs_from_parquet(
+    rows: list[dict[str, Any]],
+) -> tuple[set[str], dict[str, list[JobEntry]]]:
     """Build a run index and reusable job snapshots from Parquet rows."""
     existing_run_ids = set()
     jobs_by_run: dict[str, list[JobEntry]] = {}
@@ -566,8 +611,7 @@ def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
         row["run_id"] for row in current_rows if row.get("run_id") is not None
     }
     existing_rows = [
-        row for row in load_parquet(path)
-        if row.get("run_id") not in request_run_ids
+        row for row in load_parquet(path) if row.get("run_id") not in request_run_ids
     ]
     save_parquet(path, existing_rows + current_rows)
 
@@ -660,7 +704,9 @@ def fetch_jobs(
     """
     return [
         create_job_cache_entry(job)
-        for job in iter_jobs(session, base_url, owner, repo, run_id, etag_cache=etag_cache)
+        for job in iter_jobs(
+            session, base_url, owner, repo, run_id, etag_cache=etag_cache
+        )
     ]
 
 
@@ -813,8 +859,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     if not host:
         parser.error(
-            "No host provided and no environment variable set. Please set "
-            "GH_HOST.",
+            "No host provided and no environment variable set. Please set GH_HOST.",
         )
 
     base_url = f"https://{host}/api/v3"
@@ -865,7 +910,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     existing_parquet_rows = load_parquet(str(parquet_file))
-    existing_run_ids, cached_jobs_by_run = cached_jobs_from_parquet(existing_parquet_rows)
+    existing_run_ids, cached_jobs_by_run = cached_jobs_from_parquet(
+        existing_parquet_rows
+    )
 
     # The JSON file is deliberately a snapshot of this request only.
     cache = WorkflowCache(
@@ -882,7 +929,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # No status/conclusion filter is applied.
     # ------------------------------------------------------------------
 
-    logger.info(f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({args.workflow})")
+    logger.info(
+        f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({args.workflow})"
+    )
     logger.info(f"Date range: {args.from_date} .. {args.to_date} ...")
 
     runs = None
@@ -997,10 +1046,23 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         # --------------------------------------------------------------
         # Completed runs with already cached jobs are immutable for
         # our purposes. The jobs API does not need to be queried again.
+        #
+        # This only holds if the cached jobs themselves are terminal too:
+        # a run can flip to "completed" while its last cached job snapshot
+        # still shows it as running (e.g. cached one sync earlier). Reusing
+        # that stale, non-terminal job while bumping cache_updated_at would
+        # make calculate_job_active_duration_in_seconds() keep growing the
+        # active duration on every later sync, long after the job actually
+        # finished.
         # --------------------------------------------------------------
 
-        if run["status"] == "completed" and run_id in cached_jobs_by_run:
-            cached.jobs = cached_jobs_by_run[run_id]
+        cached_jobs = cached_jobs_by_run.get(run_id)
+        jobs_are_terminal = cached_jobs is not None and all(
+            entry.job.completed_at is not None for entry in cached_jobs
+        )
+
+        if run["status"] == "completed" and jobs_are_terminal:
+            cached.jobs = cached_jobs
             cached.cache_updated_at = now_iso()
             completed_runs_in_response += 1
             continue
@@ -1067,7 +1129,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     logger.info("Cache update completed.")
-    logger.info(f"ETag cache:   {etag_cache_file} ({format_file_size(etag_cache_file)})")
+    logger.info(
+        f"ETag cache:   {etag_cache_file} ({format_file_size(etag_cache_file)})"
+    )
     logger.info(f"GH Response:  {response_file} ({format_file_size(response_file)})")
     logger.info(f"    Runs:     {len(runs)} ({new_runs} new, {known_runs} known)")
     logger.info(f"Cache:        {parquet_file} ({format_file_size(parquet_file)})")
@@ -1090,6 +1154,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     #     logger.info(f"Average job duration for 'Check Changed Files' jobs in August 2026: {avg_duration}")
 
     # test_query(parquet_file)
+
 
 if __name__ == "__main__":
     try:

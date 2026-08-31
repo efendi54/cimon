@@ -31,7 +31,7 @@ _QUERY = """
         job_status,
         job_url,
         cast(created_at AS TIMESTAMPTZ) AS created_at,
-        job_active_duration_sec
+        job_active_duration_sec / 60.0 AS job_active_duration_min
     FROM jobs
     WHERE job_active_duration_sec IS NOT NULL
     ORDER BY workflow_file, created_at
@@ -59,14 +59,14 @@ def _add_duration_traces(
         figure.add_trace(
             go.Scatter(
                 x=sub["created_at"],
-                y=sub["job_active_duration_sec"],
+                y=sub["job_active_duration_min"],
                 mode="markers",
                 name=job_name,
                 legendgroup=job_name,
                 showlegend=job_name not in legend_shown,
                 marker={"size": 9, "color": colors[job_name], "line": {"width": 1, "color": "black"}},
                 customdata=sub["job_url"],
-                hovertemplate="%{y} s<br>%{customdata}<extra>%{fullData.name}</extra>",
+                hovertemplate="%{y:.1f} min<br>%{customdata}<extra>%{fullData.name}</extra>",
             ),
             row=1,
             col=col,
@@ -112,6 +112,6 @@ def render(table: pa.Table, output_dir: Path) -> None:
         # Higher contrast against the plot background.
         figure.update_layout(title=f"Job duration -- {workflow_name}", plot_bgcolor="#e5e5e5")
         figure.update_xaxes(title_text="time")
-        figure.update_yaxes(title_text="active duration (s)", col=1)
+        figure.update_yaxes(title_text="active duration (min)", col=1)
         figure.write_html(output_path, post_script=_CLICK_TO_OPEN_JOB_URL)
         logger.info(f"Wrote {output_path}")

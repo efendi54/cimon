@@ -29,11 +29,9 @@ done
 # get list of workflow files being triggered in pull_request or merge_group events
 mapfile -t wf_files < <(grep -RE "(merge_group|pull_request):" ${WORKSPACE_FOLDER}/.github/workflows/ | cut -d: -f1 |  xargs -n1 basename | sort -u)
 
-# for wf in "${wf_files[@]}"; do
-#   uv run cimon sync --workflow "$wf" --from-date "$(date -I)"
-# done
-uv run cimon sync --workflow pr.yml --from-date "$(date -I)"
-uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"
+for wf in "${wf_files[@]}"; do
+  uv run cimon sync --workflow "$wf" --from-date "$(date -I)"
+done
 
 uv run cimon quota
 uv run --extra viz cimon visualize job-durations -i "${CIMON_CACHE_DIR}/workflows.parquet" -o out/visualizations

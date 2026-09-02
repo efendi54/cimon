@@ -35,6 +35,7 @@ class RunEntry(BaseModel):
     run_number: int
     run_attempt: int | None = None
     workflow_run_url: str
+    event: str | None = None
     workflow_status: str
     workflow_conclusion: str | None = None
     created_at: str

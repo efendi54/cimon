@@ -69,6 +69,7 @@ PARQUET_SCHEMA = pa.schema(
         ("run_number", pa.int64()),
         ("run_attempt", pa.int64()),
         ("workflow_run_url", pa.string()),
+        ("event", pa.string()),
         ("workflow_status", pa.string()),
         ("workflow_conclusion", pa.string()),
         ("created_at", pa.string()),
@@ -246,6 +247,50 @@ def scan_active_runs(
     return active_runs
 
 
+def fetch_run(
+    session: requests.Session,
+    base_url: str,
+    owner: str,
+    repo: str,
+    run_id: int | str,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Fetch a single workflow run by ID, regardless of its current status."""
+    return api_get(
+        session,
+        f"{base_url}/repos/{owner}/{repo}/actions/runs/{run_id}",
+        etag_cache=etag_cache,
+    ).json()
+
+
+def find_stale_active_run_ids(
+    parquet_rows: list[dict[str, Any]],
+    known_run_ids: set[str],
+) -> set[str]:
+    """
+    Find cached runs still active locally but missed by this sync's other fetches.
+
+    This happens once a run's created_at falls outside the requested date
+    range *and* it stops being queued/in_progress on GitHub (e.g. gets
+    cancelled) between syncs: iter_runs() no longer includes it (wrong date
+    range) and scan_active_runs() no longer includes it either (GitHub
+    doesn't report it as active anymore), so its stale local status would
+    otherwise never get corrected.
+    """
+    last_status_by_run: dict[str, str] = {}
+    for row in parquet_rows:
+        run_id = row.get("run_id")
+        if run_id is None:
+            continue
+        last_status_by_run[str(run_id)] = row.get("workflow_status")
+
+    return {
+        run_id
+        for run_id, status in last_status_by_run.items()
+        if run_id not in known_run_ids and status in ACTIVE_RUN_STATUSES
+    }
+
+
 def iter_jobs(
     session: requests.Session,
     base_url: str,
@@ -396,6 +441,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
             "run_number": run.run_number,
             "run_attempt": run.run_attempt,
             "workflow_run_url": run.workflow_run_url,
+            "event": run.event,
             "workflow_status": run.workflow_status,
             "workflow_conclusion": run.workflow_conclusion,
             "created_at": run.created_at,
@@ -663,6 +709,7 @@ def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
         run_number=run["run_number"],
         run_attempt=run.get("run_attempt"),
         workflow_run_url=run["html_url"],
+        event=run.get("event"),
         workflow_status=run["status"],
         workflow_conclusion=run["conclusion"],
         created_at=run["created_at"],
@@ -734,6 +781,7 @@ def update_run_cache_entry(
     cached.run_number = run["run_number"]
     cached.run_attempt = run.get("run_attempt")
     cached.workflow_run_url = run["html_url"]
+    cached.event = run.get("event")
     cached.workflow_status = run["status"]
     cached.workflow_conclusion = run["conclusion"]
     cached.created_at = run["created_at"]
@@ -1019,6 +1067,35 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             "outside the requested date range",
         )
         runs.extend(active_runs)
+
+    # ------------------------------------------------------------------
+    # Reconcile stale locally-active runs
+    #
+    # A run cached as queued/in_progress can be cancelled/completed on
+    # GitHub after its created_at falls outside future date-range queries,
+    # at which point it also stops showing up in the active-run scan (it's
+    # no longer active on GitHub either). Without this, such a run's stale
+    # status -- and its jobs -- would never get refreshed again.
+    # ------------------------------------------------------------------
+
+    stale_active_run_ids = find_stale_active_run_ids(existing_parquet_rows, known_run_ids)
+
+    if stale_active_run_ids:
+        logger.info(
+            f"Reconciling {len(stale_active_run_ids)} run(s) cached as "
+            "queued/in_progress but missed by the date range and active-run scan",
+        )
+        for run_id in stale_active_run_ids:
+            run = fetch_run(
+                session,
+                base_url,
+                args.owner,
+                args.repo,
+                run_id,
+                etag_cache=etag_cache_view,
+            )
+            runs.append(run)
+            known_run_ids.add(run_id)
 
     # ------------------------------------------------------------------
     # Update workflow-run cache

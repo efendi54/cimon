@@ -24,8 +24,8 @@ the same filter definitions from Python code, a CLI call, or a config file.
 ## Row granularity
 
 Each row is one **job** belonging to one **run**. Run-level columns
-(`run_id`, `workflow_status`, `workflow_conclusion`, `created_at`, ...) repeat
-across every job row of the same run; job-level columns (`job_id`,
+(`run_id`, `event`, `workflow_status`, `workflow_conclusion`, `created_at`,
+...) repeat across every job row of the same run; job-level columns (`job_id`,
 `job_name`, `job_status`, `job_conclusion`, `job_duration_sec`,
 `job_active_duration_sec`, `job_runner_name`, `job_runner_labels`, ...)
 describe that specific job.
@@ -61,11 +61,14 @@ AND-combined with any previous filter. `columns()` restricts which columns
 are read from disk. Nothing touches disk until `to_table()`/`to_pylist()` is
 called.
 
-Built-in shortcuts: `run_id`, `workflow_conclusion`, `job_conclusion`,
+Built-in shortcuts: `run_id`, `event`, `workflow_conclusion`, `job_conclusion`,
 `job_name`, `job_status`, `runner_label`, `created_between`. Generic building
 blocks usable for anything else: `where(**equals)`, `isin(column, values)`,
 `between(column, low, high)`, `not_null(column)`, and the escape hatch
 `filter(expr)` for an arbitrary `pyarrow.dataset` expression.
+
+`event` holds the GitHub Actions event that triggered the run (e.g. `push`,
+`pull_request`, `schedule`, `workflow_dispatch`).
 
 ## Declarative spec (YAML/JSON)
 

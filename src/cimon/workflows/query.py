@@ -98,6 +98,10 @@ class WorkflowQuery:
         """Keep rows whose run concluded with any of the given values (e.g. "failure")."""
         return self.isin("workflow_conclusion", conclusions)
 
+    def event(self, *events: str) -> WorkflowQuery:
+        """Keep rows whose triggering event is any of the given values (e.g. "push", "pull_request")."""
+        return self.isin("event", events)
+
     def job_conclusion(self, *conclusions: str) -> WorkflowQuery:
         """Keep rows whose job concluded with any of the given values."""
         return self.isin("job_conclusion", conclusions)

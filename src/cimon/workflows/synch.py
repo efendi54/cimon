@@ -72,6 +72,8 @@ PARQUET_SCHEMA = pa.schema(
         ("event", pa.string()),
         ("workflow_status", pa.string()),
         ("workflow_conclusion", pa.string()),
+        ("pr_number", pa.int64()),
+        ("pr_url", pa.string()),
         ("created_at", pa.string()),
         ("cache_updated_at", pa.string()),
         ("job_id", pa.string()),
@@ -444,6 +446,8 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
             "event": run.event,
             "workflow_status": run.workflow_status,
             "workflow_conclusion": run.workflow_conclusion,
+            "pr_number": run.pr_number,
+            "pr_url": run.pr_url,
             "created_at": run.created_at,
             "cache_updated_at": run.cache_updated_at,
         }
@@ -702,8 +706,38 @@ def create_workflow_cache_entry(
     )
 
 
-def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
+def _extract_pull_request_info(
+    run: dict[str, Any],
+    owner: str,
+    repo: str,
+    host: str,
+) -> tuple[int | None, str | None]:
+    """
+    Extract the number/URL of the PR a run belongs to, if any.
+
+    GitHub only populates "pull_requests" for a currently *open* PR whose
+    head_sha it can still match to the run -- PRs from a forked repository
+    are never linked here, and a same-repo match is also lost once the PR
+    merges/closes (especially if its branch got deleted). This means the
+    field can be empty even for an `event == "pull_request"` run, and can
+    flip from populated to empty on a later refresh of the same run.
+    """
+    pull_requests = run.get("pull_requests") or []
+    if not pull_requests:
+        return None, None
+
+    number = pull_requests[0]["number"]
+    return number, f"https://{host}/{owner}/{repo}/pull/{number}"
+
+
+def create_run_cache_entry(
+    run: dict[str, Any],
+    owner: str,
+    repo: str,
+    host: str,
+) -> RunEntry:
     """Create a cache entry for a workflow run."""
+    pr_number, pr_url = _extract_pull_request_info(run, owner, repo, host)
     return RunEntry(
         run_id=run["id"],
         run_number=run["run_number"],
@@ -712,6 +746,8 @@ def create_run_cache_entry(run: dict[str, Any]) -> RunEntry:
         event=run.get("event"),
         workflow_status=run["status"],
         workflow_conclusion=run["conclusion"],
+        pr_number=pr_number,
+        pr_url=pr_url,
         created_at=run["created_at"],
         cache_updated_at=now_iso(),
     )
@@ -772,6 +808,9 @@ def process_job_run(
 def update_run_cache_entry(
     cached: RunEntry,
     run: dict[str, Any],
+    owner: str,
+    repo: str,
+    host: str,
 ) -> None:
     """
     Update the workflow-run information from GitHub.
@@ -784,6 +823,15 @@ def update_run_cache_entry(
     cached.event = run.get("event")
     cached.workflow_status = run["status"]
     cached.workflow_conclusion = run["conclusion"]
+
+    # GitHub only reports "pull_requests" for PRs it can still resolve (see
+    # _extract_pull_request_info); once that stops being possible -- e.g. the
+    # PR merged and its branch got deleted -- a previously-known pr_number/
+    # pr_url must not be overwritten with None on a later refresh.
+    pr_number, pr_url = _extract_pull_request_info(run, owner, repo, host)
+    if pr_number is not None:
+        cached.pr_number, cached.pr_url = pr_number, pr_url
+
     cached.created_at = run["created_at"]
     cached.cache_updated_at = now_iso()
 
@@ -1109,7 +1157,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     for run in runs:
         run_id = str(run["id"])
-        cached = create_run_cache_entry(run)
+        cached = create_run_cache_entry(run, args.owner, args.repo, host)
         cached_runs[run_id] = cached
 
         if run_id not in existing_run_ids:
@@ -1117,7 +1165,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             logger.debug(f"Caching new workflow run {run_id}")
 
         else:
-            update_run_cache_entry(cached, run)
+            update_run_cache_entry(cached, run, args.owner, args.repo, host)
             known_runs += 1
 
         # --------------------------------------------------------------

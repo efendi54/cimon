@@ -25,10 +25,19 @@ the same filter definitions from Python code, a CLI call, or a config file.
 
 Each row is one **job** belonging to one **run**. Run-level columns
 (`run_id`, `event`, `workflow_status`, `workflow_conclusion`, `created_at`,
-...) repeat across every job row of the same run; job-level columns (`job_id`,
-`job_name`, `job_status`, `job_conclusion`, `job_duration_sec`,
-`job_active_duration_sec`, `job_runner_name`, `job_runner_labels`, ...)
-describe that specific job.
+`pr_number`, `pr_url`, ...) repeat across every job row of the same run;
+job-level columns (`job_id`, `job_name`, `job_status`, `job_conclusion`,
+`job_duration_sec`, `job_active_duration_sec`, `job_runner_name`,
+`job_runner_labels`, ...) describe that specific job.
+
+`pr_number`/`pr_url` are only set when the run's `pull_requests` response
+from GitHub is non-empty. GitHub only reports that field for a currently
+*open* PR whose head_sha it can still match to the run: it's never
+populated for PRs opened from a fork, and a same-repo match is also lost
+once the PR merges/closes (especially once its branch gets deleted) --
+so a run can have `event == "pull_request"` yet `pr_number` still `NULL`.
+Once cached with a real value, a later refresh won't blank it back to
+`NULL` even if GitHub itself stops reporting the association.
 
 `job_duration_sec` is only set once a job has `completed_at` (its final
 duration). `job_active_duration_sec` is set as soon as a job has started: it

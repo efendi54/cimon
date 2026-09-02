@@ -38,6 +38,8 @@ class RunEntry(BaseModel):
     event: str | None = None
     workflow_status: str
     workflow_conclusion: str | None = None
+    pr_number: int | None = None
+    pr_url: str | None = None
     created_at: str
     cache_updated_at: str
     jobs: list[JobEntry] = Field(default_factory=list)

@@ -165,6 +165,20 @@ def cache_info(cache_dir: Path) -> None:
     synch.print_cache_info(cache_dir)
 
 
+@main.command("repair-cache")
+@click.option(
+    "--cache-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.home() / ".cache/cimon",
+    help="Directory where caching related files are stored.",
+)
+def repair_cache(cache_dir: Path) -> None:
+    """Recompute job_duration_sec/job_active_duration_sec for the whole Parquet cache locally (no GitHub API calls)."""
+    parquet_file = Path(cache_dir).resolve() / synch.WORKFLOWS_PARQUET_FILE_NAME
+    changed = synch.repair_job_durations(str(parquet_file))
+    logger.info(f"Repaired {changed} value(s) in {parquet_file}")
+
+
 @main.command("query")
 @click.option(
     "-i",

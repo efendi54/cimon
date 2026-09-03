@@ -334,21 +334,31 @@ def iter_jobs(
     yield from jobs
 
 
-def calculate_job_duration_in_seconds(job: dict[str, Any]) -> int | None:
-    """Calculate a job duration in seconds."""
-    if not job.get("started_at") or not job.get("completed_at"):
+def _duration_seconds(started_at: str | None, completed_at: str | None) -> int | None:
+    """Seconds between two GitHub-formatted timestamps, or None if not computable."""
+    if not started_at or not completed_at:
         return None
 
     start = dt.datetime.strptime(
-        job["started_at"],
+        started_at,
         "%Y-%m-%dT%H:%M:%SZ",
     ).replace(tzinfo=dt.timezone.utc)
     end = dt.datetime.strptime(
-        job["completed_at"],
+        completed_at,
         "%Y-%m-%dT%H:%M:%SZ",
     ).replace(tzinfo=dt.timezone.utc)
 
-    return int((end - start).total_seconds())
+    duration = int((end - start).total_seconds())
+
+    # GitHub reports completed_at slightly *before* started_at for jobs that
+    # never actually ran (mostly skipped, occasionally cancelled); there's no
+    # real duration to report for those, so avoid emitting a negative value.
+    return duration if duration >= 0 else None
+
+
+def calculate_job_duration_in_seconds(job: dict[str, Any]) -> int | None:
+    """Calculate a job duration in seconds."""
+    return _duration_seconds(job.get("started_at"), job.get("completed_at"))
 
 
 def calculate_job_active_duration_in_seconds(job: JobInfo, as_of: str) -> int | None:
@@ -362,7 +372,11 @@ def calculate_job_active_duration_in_seconds(job: JobInfo, as_of: str) -> int | 
     if job.duration_sec is not None:
         return job.duration_sec
 
-    if not job.started_at:
+    # A completed job with no duration_sec means the raw started_at/
+    # completed_at pair was discarded as invalid (see
+    # calculate_job_duration_in_seconds); it never really ran, so don't fall
+    # through to computing a bogus elapsed time against `as_of`.
+    if not job.started_at or job.status == "completed":
         return None
 
     start = dt.datetime.strptime(
@@ -641,7 +655,14 @@ def cached_jobs_from_parquet(
                 run_attempt=row.get("job_run_attempt"),
                 started_at=row.get("job_started_at"),
                 completed_at=row.get("job_completed_at"),
-                duration_sec=row.get("job_duration_sec"),
+                # Recomputed rather than trusting row["job_duration_sec"], so
+                # previously-cached bad values (see _duration_seconds) heal
+                # themselves once a run passes through here again, instead of
+                # being copied forward forever by the "terminal jobs are
+                # immutable" cache-reuse path.
+                duration_sec=_duration_seconds(
+                    row.get("job_started_at"), row.get("job_completed_at")
+                ),
                 status=row.get("job_status"),
                 conclusion=row.get("job_conclusion"),
                 runner_name=row.get("job_runner_name"),
@@ -664,6 +685,46 @@ def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
         row for row in load_parquet(path) if row.get("run_id") not in request_run_ids
     ]
     save_parquet(path, existing_rows + current_rows)
+
+
+def repair_job_durations(path: str) -> int:
+    """Recompute job_duration_sec/job_active_duration_sec across the whole cache in place.
+
+    Purely local (no GitHub API calls): re-derives both columns from the
+    already-cached started_at/completed_at timestamps. Needed because
+    `sync`'s "completed runs with terminal jobs are immutable" optimization
+    (see main()) only recomputes a run's jobs when that run's job data is
+    actually refetched, so rows written before _duration_seconds()'s
+    negative-duration guard existed would otherwise keep their stale, wrong
+    value indefinitely.
+    """
+    rows = load_parquet(path)
+    changed = 0
+
+    for row in rows:
+        duration = _duration_seconds(row.get("job_started_at"), row.get("job_completed_at"))
+        if duration != row.get("job_duration_sec"):
+            row["job_duration_sec"] = duration
+            changed += 1
+
+        if duration is not None:
+            active_duration = duration
+        elif row.get("job_status") == "completed" or not row.get("job_started_at"):
+            active_duration = None
+        else:
+            # Still-running job: no `as_of` available here to recompute a
+            # fresh elapsed time, and this branch was never affected by the
+            # negative-duration bug, so leave the cached value as-is.
+            active_duration = row.get("job_active_duration_sec")
+
+        if active_duration != row.get("job_active_duration_sec"):
+            row["job_active_duration_sec"] = active_duration
+            changed += 1
+
+    if changed:
+        save_parquet(path, rows)
+
+    return changed
 
 
 def save_parquet(path: str, rows: list[dict[str, Any]]) -> None:

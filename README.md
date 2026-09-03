@@ -97,6 +97,26 @@ date in one go, see
 loops `cimon sync` over every workflow file referencing `pull_request`/
 `merge_group` and syncs each one from today's date.
 
+#### Edge case: negative `job_duration_sec`
+
+For jobs that never actually ran (mostly `skipped`, occasionally
+`cancelled`), GitHub's API can report `completed_at` a few seconds *before*
+`started_at`, which would otherwise yield a negative `job_duration_sec`.
+`cimon` clamps this to `None` instead. Because "completed runs whose jobs
+are already cached are immutable" (see above), a run whose jobs were synced
+before this clamp existed keeps a stale, wrong value in
+`workflows.parquet` until that run's jobs are rebuilt from their cached
+`started_at`/`completed_at` -- which happens automatically the next time the
+run is synced (no extra API calls needed), but only for runs within the
+sync's requested date range / active-run scan.
+
+To fix already-cached, out-of-range history in one go without touching the
+GitHub API, run:
+
+```bash
+uv run cimon repair-cache --cache-dir .
+```
+
 #### Quota
 
 Since every sync consumes GitHub API quota, check how much is left (reads

@@ -1198,7 +1198,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # status -- and its jobs -- would never get refreshed again.
     # ------------------------------------------------------------------
 
-    stale_active_run_ids = find_stale_active_run_ids(existing_parquet_rows, known_run_ids)
+    # `existing_parquet_rows` spans every workflow ever synced into this
+    # cache file, not just this one -- restrict to rows already tagged with
+    # the current workflow_id, otherwise a run that's genuinely still
+    # active under a *different* workflow gets misattributed to this one
+    # by the reconciliation below (create_run_cache_entry() always stamps
+    # the currently-synced workflow's identity).
+    own_workflow_id = str(workflow["id"])
+    own_parquet_rows = [
+        row for row in existing_parquet_rows if row.get("workflow_id") == own_workflow_id
+    ]
+    stale_active_run_ids = find_stale_active_run_ids(own_parquet_rows, known_run_ids)
 
     if stale_active_run_ids:
         logger.info(

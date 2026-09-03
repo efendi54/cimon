@@ -10,6 +10,8 @@ export GH_HOST=cariad.ghe.com
 export WORKSPACE_FOLDER=/workspaces/app-adas-src
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CIMON_CACHE_DIR=${HOME}/.cache/cimon
+# Absolute (not pushd-relative), so it doesn't silently drift to scripts/out/...
+CIMON_VIZ_OUTPUT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)/out/visualizations"
 # <<--
 
 pushd "$SCRIPT_DIR" >/dev/null
@@ -29,11 +31,13 @@ done
 # get list of workflow files being triggered in pull_request or merge_group events
 mapfile -t wf_files < <(grep -RE "(merge_group|pull_request):" ${WORKSPACE_FOLDER}/.github/workflows/ | cut -d: -f1 |  xargs -n1 basename | sort -u)
 
-for wf in "${wf_files[@]}"; do
-  uv run cimon sync --workflow "$wf" --from-date "$(date -I)"
-done
+# for wf in "${wf_files[@]}"; do
+#   uv run cimon sync --workflow "$wf" --from-date "$(date -I)"
+# done
+uv run cimon sync --workflow pr.yml --from-date "$(date -I)"
+uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"
 
 uv run cimon quota
-uv run --extra viz cimon visualize job-durations -i "${CIMON_CACHE_DIR}/workflows.parquet" -o out/visualizations
+uv run --extra viz cimon visualize job-durations -i "${CIMON_CACHE_DIR}/workflows.parquet" -o "${CIMON_VIZ_OUTPUT_DIR}"
 
 popd >/dev/null

@@ -70,6 +70,7 @@ PARQUET_SCHEMA = pa.schema(
         ("run_attempt", pa.int64()),
         ("workflow_run_url", pa.string()),
         ("event", pa.string()),
+        ("head_branch", pa.string()),
         ("workflow_status", pa.string()),
         ("workflow_conclusion", pa.string()),
         ("pr_number", pa.int64()),
@@ -458,6 +459,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
             "run_attempt": run.run_attempt,
             "workflow_run_url": run.workflow_run_url,
             "event": run.event,
+            "head_branch": run.head_branch,
             "workflow_status": run.workflow_status,
             "workflow_conclusion": run.workflow_conclusion,
             "pr_number": run.pr_number,
@@ -805,6 +807,7 @@ def create_run_cache_entry(
         run_attempt=run.get("run_attempt"),
         workflow_run_url=run["html_url"],
         event=run.get("event"),
+        head_branch=run.get("head_branch"),
         workflow_status=run["status"],
         workflow_conclusion=run["conclusion"],
         pr_number=pr_number,
@@ -882,6 +885,14 @@ def update_run_cache_entry(
     cached.run_attempt = run.get("run_attempt")
     cached.workflow_run_url = run["html_url"]
     cached.event = run.get("event")
+
+    # GitHub blanks head_branch to null once the branch itself gets deleted
+    # (e.g. after a PR merges) -- a previously-known branch name must not be
+    # overwritten with None on a later refresh, same as pr_number/pr_url below.
+    head_branch = run.get("head_branch")
+    if head_branch is not None:
+        cached.head_branch = head_branch
+
     cached.workflow_status = run["status"]
     cached.workflow_conclusion = run["conclusion"]
 

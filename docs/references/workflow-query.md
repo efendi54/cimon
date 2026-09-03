@@ -24,11 +24,16 @@ the same filter definitions from Python code, a CLI call, or a config file.
 ## Row granularity
 
 Each row is one **job** belonging to one **run**. Run-level columns
-(`run_id`, `event`, `workflow_status`, `workflow_conclusion`, `created_at`,
-`pr_number`, `pr_url`, ...) repeat across every job row of the same run;
-job-level columns (`job_id`, `job_name`, `job_status`, `job_conclusion`,
-`job_duration_sec`, `job_active_duration_sec`, `job_runner_name`,
-`job_runner_labels`, ...) describe that specific job.
+(`run_id`, `event`, `head_branch`, `workflow_status`, `workflow_conclusion`,
+`created_at`, `pr_number`, `pr_url`, ...) repeat across every job row of the
+same run; job-level columns (`job_id`, `job_name`, `job_status`,
+`job_conclusion`, `job_duration_sec`, `job_active_duration_sec`,
+`job_runner_name`, `job_runner_labels`, ...) describe that specific job.
+
+`head_branch` is the branch the run was triggered on (GitHub's `head_branch`
+field). Like `pr_number`/`pr_url` below, GitHub can blank it back to `NULL`
+once that branch gets deleted (e.g. after a PR merges); once cached with a
+real value, a later refresh won't overwrite it with `NULL`.
 
 `pr_number`/`pr_url` are only set when the run's `pull_requests` response
 from GitHub is non-empty. GitHub only reports that field for a currently

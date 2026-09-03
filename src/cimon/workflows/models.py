@@ -36,6 +36,7 @@ class RunEntry(BaseModel):
     run_attempt: int | None = None
     workflow_run_url: str
     event: str | None = None
+    head_branch: str | None = None
     workflow_status: str
     workflow_conclusion: str | None = None
     pr_number: int | None = None

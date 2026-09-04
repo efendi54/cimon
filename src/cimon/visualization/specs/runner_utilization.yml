@@ -9,4 +9,4 @@ all:
     value: "in_progress"
   - column: created_at
     op: between
-    value: ["today-4d", "today_end"]
+    value: ["today", "today_end"]

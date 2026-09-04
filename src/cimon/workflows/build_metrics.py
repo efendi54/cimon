@@ -147,6 +147,7 @@ def download_job_log(
                 "--hostname",
                 host,
                 f"/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+                "--allow-escape-sequences"
             ],
             stdout=f,
             check=True,
@@ -207,7 +208,7 @@ def download_build_profiles_if_exists(
     print(f"Downloaded artifact to {target}")
 
 
-def get_bazel_targets_argument(command_line: str) -> str:
+def get_bazel_targets_argument(command_line: str) -> list[str]:
     args = shlex.split(command_line)
 
     try:
@@ -225,13 +226,13 @@ def get_bazel_targets_argument(command_line: str) -> str:
 
         # --target_pattern_file=<file>
         if arg.startswith("--target_pattern_file="):
-            return arg.split("=", 1)[1]
+            return [arg.split("=", 1)[1]]
 
         # --target_pattern_file <file>
         if arg == "--target_pattern_file":
             if i + 1 >= len(args):
                 raise ValueError("--target_pattern_file specified without filename.")
-            return args[i + 1]
+            return [args[i + 1]]
 
         # Bazel target
         if arg.startswith("//") or arg.startswith("@"):
@@ -239,12 +240,26 @@ def get_bazel_targets_argument(command_line: str) -> str:
 
         i += 1
 
-    return " ".join(targets)
+    return targets
 
 
 def parse_log(logfile: Path) -> list[dict[str, Any]]:
+    """Parse a job log into one entry per 'bazel build' invocation.
+
+    A single invocation can emit several 'INFO: ... cache hit' lines (e.g. one
+    per retry after a transient remote-cache error), so the entry is only
+    finalized once the next 'bazel build' line (or EOF) is reached, using the
+    last INFO line seen as the actual end timestamp and cache-hit numbers.
+    """
     builds: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+
+    def finalize(entry: dict[str, Any]) -> None:
+        if "info_ts" not in entry:
+            raise RuntimeError(
+                "Missing INFO for build:\n" + entry["build_line"]
+            )
+        builds.append(entry)
 
     with open(logfile, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -252,17 +267,13 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
 
             if bm:
                 if current is not None:
-                    raise RuntimeError(
-                        "Missing INFO for previous build:\n"
-                        + current["build_line"]
-                    )
+                    finalize(current)
 
                 current = {
                     "start_ts": parse_ts(bm.group("ts")).isoformat(),
                     "build_line": line.strip(),
                 }
-                targets = get_bazel_targets_argument(line)
-                current["targets"] = targets
+                current["targets"] = get_bazel_targets_argument(line)
                 continue
 
             im = INFO_RE.search(line)
@@ -274,6 +285,8 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                 info_ts = parse_ts(im.group("ts")).isoformat()
                 info = datetime.fromisoformat(info_ts)
 
+                # Overwrite (not append) so a later retry's output replaces
+                # an earlier one instead of prematurely closing the entry.
                 current.update(
                     {
                         "duration_sec": (
@@ -291,14 +304,8 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                     }
                 )
 
-                builds.append(current)
-                current = None
-
     if current is not None:
-        raise RuntimeError(
-            "Missing INFO for last build:\n"
-            + current["build_line"]
-        )
+        finalize(current)
 
     return builds
 
@@ -312,7 +319,7 @@ def generate_md_table_entries(
         f'**URL:** <{job_info["job-html-url"]}>\n',
         f'**Duration:** {fmt(job_info["duration_sec"])}\n',
         "",
-        "Target(s) | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
+        "Target | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
@@ -341,19 +348,22 @@ def generate_md_table_entries(
             f"<br><code>{b['info_line']}</code>"
         )
 
-        md.append(
-            f"| {b['targets']} "
-            f"| {fmt(duration)} "
-            f"| **{rate:.1f}%** "
-            f"| {c['action']} "
-            f"| {c['remote']} "
-            f"| {c['internal']} "
-            f"| {c['local']} "
-            f"| {c['sandbox']} "
-            f"| {hits} "
-            f"| {total} "
-            f"| {cell} |"
-        )
+        # Bazel reports cache stats per invocation, not per target, so every
+        # target of a multi-target build shares the same duration/rate/cache.
+        for target in b["targets"]:
+            md.append(
+                f"| {target} "
+                f"| {fmt(duration)} "
+                f"| **{rate:.1f}%** "
+                f"| {c['action']} "
+                f"| {c['remote']} "
+                f"| {c['internal']} "
+                f"| {c['local']} "
+                f"| {c['sandbox']} "
+                f"| {hits} "
+                f"| {total} "
+                f"| {cell} |"
+            )
 
     return "\n".join(md)
 

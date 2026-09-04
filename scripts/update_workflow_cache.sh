@@ -38,7 +38,6 @@ done
 # uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"
 
 uv run cimon quota
-uv run --extra viz cimon visualize job-durations -i "${CIMON_CACHE_DIR}/workflows.parquet" -o "${CIMON_VIZ_OUTPUT_DIR}"
-uv run --extra viz cimon visualize merge-group-failures -i "${CIMON_CACHE_DIR}/workflows.parquet" -o "${CIMON_VIZ_OUTPUT_DIR}"
+uv run --extra viz cimon visualize job-durations merge-group-failures runner-utilization -i "${CIMON_CACHE_DIR}/workflows.parquet" -o "${CIMON_VIZ_OUTPUT_DIR}"
 
 popd >/dev/null

@@ -1,4 +1,5 @@
-# Adjust the `between` range below to the time span you want to inspect.
+# Time span to inspect. "today-4d"/"today_end" resolve to actual dates at
+# build time (see cimon.workflows.query_spec), so this never needs manual edits.
 all:
   - column: job_runner_labels
     op: list_contains
@@ -8,4 +9,4 @@ all:
     value: "in_progress"
   - column: created_at
     op: between
-    value: ["2026-08-31T00:00:00Z", "2026-08-31T23:59:59Z"]
+    value: ["today-4d", "today_end"]

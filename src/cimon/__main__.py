@@ -1,5 +1,5 @@
 # ruff: noqa: CPY001
-"""CI Monitor CLI tool for generating call graphs of GitHub workflows and other stuff."""
+"""CI Monitor CLI tool for tracking GitHub Actions workflow runs and other stuff."""
 
 import logging
 import sys
@@ -9,7 +9,6 @@ import click
 import yaml
 
 import requests
-from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
 from cimon.github_api import QuotaLimitReachedError, create_session, print_quota
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
@@ -46,66 +45,6 @@ def main(log_level: str, log_file: Path | None) -> None:
         force=True,
     )
     logger.info(f"Command line: {' '.join(sys.argv)}")
-
-
-@main.command()
-@click.option(
-    "-h",
-    "--host_url",
-    envvar="GH_HOST_URL",
-    type=str,
-    required=False,
-    default="git.hub.vwgroup.com",
-    help="""GitHub host URL, e.g., 'git.hub.vwgroup.com'.
-    The value can be set via the 'GH_HOST_URL' environment variable.""",
-)
-@click.option(
-    "-r",
-    "--repo_name",
-    envvar="GH_REPO_NAME",
-    type=str,
-    required=False,
-    default="CARIAD/app-adas-src",
-    help="""GitHub repository name in the format 'owner/repo'.
-    The value can be set via the 'GH_REPO_NAME' environment variable.""",
-)
-@click.option(
-    "-w",
-    "--workflow_path",
-    envvar="WORKFLOW_PATH",
-    type=click.Path(exists=True, file_okay=True, dir_okay=True, readable=True, path_type=Path),
-    default=Path(".github/workflows"),
-    help="""Relevant Workflow directory or file to use.
-    The value can be set via the 'WORKFLOW_PATH' environment variable.""",
-)
-@click.option(
-    "-d",
-    "--deep",
-    is_flag=True,
-    help="""If true will generate subgraphs for reusable workflows, otherwise will generate a shallow call-graph.""",
-)
-@click.option(
-    "-o",
-    "--output_folder",
-    envvar="OUTPUT_FOLDER",
-    type=click.Path(exists=False, file_okay=False, dir_okay=True, readable=True, path_type=Path),
-    default=Path("./out/call_graphs"),
-    help="""Output folder where the generated markdown file(s) will be put into.""",
-)
-def callgraph(
-    host_url: str,
-    repo_name: str,
-    workflow_path: str,
-    *,
-    deep: bool,
-    output_folder: Path,
-) -> None:
-    """Command to show a call graph of the workflow."""
-    logger.debug("Using GitHub host URL: %s", host_url)
-    logger.debug("Using repository name: %s", repo_name)
-
-    callgraph_mode = MermaidCallGraphMode.DEEP if deep else MermaidCallGraphMode.SHALLOW
-    generate_mermaid_graph(wf_path=Path(workflow_path), out_path=output_folder, callgraph_mode=callgraph_mode)
 
 
 @main.command()
@@ -234,7 +173,7 @@ def query(
 
 
 @main.command("visualize")
-@click.argument("name", required=False)
+@click.argument("names", nargs=-1)
 @click.option(
     "-i",
     "--input",
@@ -257,8 +196,11 @@ def query(
     is_flag=True,
     help="List the registered visualization names and exit.",
 )
-def visualize(name: str | None, input_path: Path | None, output_dir: Path, *, list_only: bool) -> None:
-    """Filter the workflows Parquet cache per a registered visualization's spec, then render it.
+def visualize(names: tuple[str, ...], input_path: Path | None, output_dir: Path, *, list_only: bool) -> None:
+    """Filter the workflows Parquet cache per one or more registered visualizations' specs, then render them.
+
+    NAMES can be given more than once (e.g. `cimon visualize job-durations
+    merge-group-failures`) to run several visualizations in one call.
 
     See cimon.visualization.registry for the list of registered visualizations
     and how to add new ones.
@@ -267,15 +209,16 @@ def visualize(name: str | None, input_path: Path | None, output_dir: Path, *, li
         click.echo("\n".join(registry.available()))
         return
 
-    if not name:
-        msg = "Missing argument 'NAME'. Use --list to see available visualizations."
+    if not names:
+        msg = "Missing argument 'NAMES'. Use --list to see available visualizations."
         raise click.UsageError(msg)
     if not input_path:
         msg = "Missing option '-i' / '--input'."
         raise click.UsageError(msg)
 
     try:
-        pipeline.run(name, input_path, output_dir)
+        for name in names:
+            pipeline.run(name, input_path, output_dir)
     except KeyError as exc:
         raise click.UsageError(str(exc)) from None
 

@@ -119,6 +119,39 @@ pushdown-fast even for `list_contains` (implemented via a join + regex
 match under the hood, but still a single expression evaluated by the
 Parquet/Arrow engine, not a Python-level post-filter).
 
+### Relative date placeholders
+
+A string `value` matching one of the forms below is resolved to an actual
+UTC ISO-8601 timestamp when the spec is built, instead of a hand-edited date
+that goes stale:
+
+| placeholder | resolves to |
+|---|---|
+| `now` | the current instant, e.g. `2026-08-31T14:32:07Z` |
+| `today` / `today_start` | today at `00:00:00Z` |
+| `today_end` | today at `23:59:59Z` |
+| `today-<N>d` / `today-<N>d_start` | `N` days *ago* at `00:00:00Z`, e.g. `today-4d` means "4 days ago" |
+| `today-<N>d_end` | `N` days ago at `23:59:59Z` |
+| `today+<N>d[_start\|_end]` | `N` days in the future, same start/end rules |
+
+> **Note:** the `d` suffix is required. A typo like `today-4` (missing the
+> `d`) is *not* recognized as a placeholder -- it silently falls through as
+> the literal string `"today-4"` instead of raising an error, and will then
+> simply never match any real date in the column.
+
+Any string that doesn't match one of these forms (e.g. a real timestamp, or
+an unrelated value like a job name) is left untouched. This means a
+"last N days" spec like
+[runner_utilization.yml](../../src/cimon/visualization/specs/runner_utilization.yml)
+never needs its date range manually bumped:
+
+```yaml
+all:
+  - column: created_at
+    op: between
+    value: ["today-4d", "today_end"]
+```
+
 ## Example specs
 
 Runs that failed in a given month:

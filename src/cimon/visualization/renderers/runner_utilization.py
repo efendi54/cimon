@@ -76,4 +76,3 @@ def render(table: pa.Table, output_dir: Path) -> None:
     figure.update_traces(line={"width": 3}, marker={"size": 7, "line": {"width": 1, "color": "black"}})
     figure.update_layout(plot_bgcolor="#e5e5e5")
     figure.write_html(output_path)
-    logger.info(f"Wrote {output_path}")

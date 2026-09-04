@@ -17,6 +17,18 @@ Spec shape (conditions can be nested arbitrarily deep):
 Supported ops: eq, ne, gt, ge, lt, le, in, between, is_null, is_not_null,
 starts_with, contains, list_contains.
 
+Relative date placeholders: a string value matching `now`, `today`,
+`today_start`, `today_end`, or `today[+-]<N>d[_start|_end]` is resolved to an
+actual UTC ISO-8601 timestamp at build time (see `_resolve_value`), so specs
+like a runner-utilization window don't need their date range hand-edited on
+every run:
+    ```yaml
+    all:
+      - column: created_at
+        op: between
+        value: ["today-4d", "today_end"]
+    ```
+
 Example:
     ```yaml
     all:
@@ -35,6 +47,7 @@ Example:
 
 from __future__ import annotations
 
+import datetime as dt
 import operator
 import re
 from typing import TYPE_CHECKING, Any
@@ -48,6 +61,38 @@ if TYPE_CHECKING:
 # Separator used to join list-column elements before a list_contains regex
 # search; arbitrary but must be unlikely to appear inside a real element.
 _LIST_JOIN_SEP = "\x1f"
+
+# Matches relative-date placeholders: now | today | today+3d | today-3d_end | ...
+_RELATIVE_DATE_RE = re.compile(r"^(?P<base>now|today)(?:(?P<offset>[+-]\d+)d)?(?:_(?P<boundary>start|end))?$")
+
+
+def _resolve_relative_date(value: str) -> str:
+    """Resolve a `now`/`today[+-]Nd[_start|_end]` placeholder to a UTC ISO-8601 timestamp.
+
+    Strings that don't match the placeholder pattern are returned unchanged.
+    """
+    match = _RELATIVE_DATE_RE.match(value)
+    if match is None:
+        return value
+
+    if match["base"] == "now":
+        return dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    day = dt.datetime.now(tz=dt.timezone.utc).date()
+    if match["offset"]:
+        day += dt.timedelta(days=int(match["offset"]))
+
+    time_of_day = "23:59:59" if match["boundary"] == "end" else "00:00:00"
+    return f"{day.isoformat()}T{time_of_day}Z"
+
+
+def _resolve_value(value: Any) -> Any:  # noqa: ANN401
+    """Resolve relative-date placeholders in a leaf condition's `value` (scalar or list)."""
+    if isinstance(value, str):
+        return _resolve_relative_date(value)
+    if isinstance(value, list):
+        return [_resolve_relative_date(item) if isinstance(item, str) else item for item in value]
+    return value
 
 
 def _list_contains(field: ds.Expression, value: Any) -> ds.Expression:  # noqa: ANN401
@@ -108,7 +153,7 @@ def _build_condition(spec: Mapping[str, Any]) -> ds.Expression:
         msg = f"Unsupported filter operator {op!r}, expected one of {sorted(_OPS)}"
         raise ValueError(msg) from None
 
-    return apply_op(ds.field(column), spec.get("value"))
+    return apply_op(ds.field(column), _resolve_value(spec.get("value")))
 
 
 def _combine(

@@ -23,6 +23,10 @@ MIN_API_QUOTA = 100
 HTTP_NOT_MODIFIED = 304
 
 
+class QuotaLimitReachedError(RuntimeError):
+    """Raised when the remaining GitHub API quota drops to/below a configured limit."""
+
+
 class _CachedResponse:
     """Stand-in for `requests.Response` reused when the server returns 304."""
 
@@ -62,8 +66,14 @@ def save_etag_cache(path: str, cache: dict[str, dict[str, Any]]) -> None:
     cache_path.write_text(json.dumps(cache), encoding="utf-8")
 
 
-def create_session(token: str) -> requests.Session:
-    """Create an authenticated GitHub API session."""
+def create_session(token: str, *, quota_limit: int | None = None) -> requests.Session:
+    """
+    Create an authenticated GitHub API session.
+
+    `quota_limit`, if given, is checked by `api_get()` on every response: once
+    the remaining quota (`X-RateLimit-Remaining`) drops to/below it, further
+    requests raise `QuotaLimitReachedError` instead of being sent.
+    """
     session = requests.Session()
     session.headers.update(
         {
@@ -71,6 +81,7 @@ def create_session(token: str) -> requests.Session:
             "Accept": "application/vnd.github+json",
         },
     )
+    session.quota_limit = quota_limit
     return session
 
 
@@ -105,6 +116,11 @@ def api_get(
         remaining = response.headers.get("X-RateLimit-Remaining")
         if remaining and int(remaining) < MIN_API_QUOTA:
             logger.warning("API quota low: %s", remaining)
+
+        quota_limit = getattr(session, "quota_limit", None)
+        if remaining and quota_limit is not None and int(remaining) <= quota_limit:
+            msg = f"GitHub API quota limit reached: {remaining} remaining <= configured limit {quota_limit}"
+            raise QuotaLimitReachedError(msg)
 
         if response.status_code == HTTP_NOT_MODIFIED and cached is not None:
             logger.debug("ETag cache HIT (304, no quota used): %s", url)

@@ -134,6 +134,103 @@ GitHub API quota:
   Reset:     2026-08-31 16:00:00+00:00
 ```
 
+#### Aborting a sync before quota runs out
+
+The same token is often shared with other tools/scripts (e.g. other CI jobs,
+or someone using the GitHub web UI), and GitHub also enforces secondary/abuse
+rate limits independent of the plain remaining-count. Running a sync all the
+way down to 0 remaining requests is therefore riskier than necessary, and
+what quota is "safe" to leave as a buffer differs per environment (GitHub
+Enterprise Server instances can configure their own, often lower, limits).
+
+`cimon sync` accepts `--quota-limit N` to stop once the remaining quota
+drops to/below `N`, instead of running until the API itself starts rejecting
+requests:
+
+```bash
+uv run cimon sync --workflow pr.yml --from-date 2026-08-01 --quota-limit 200
+```
+
+If `--quota-limit` isn't given, it defaults to 10% of the token's actual rate
+limit ceiling (e.g. `500` for a `5000`-limit token, `1500` for `15000`) --
+picked up automatically from `/rate_limit`, so every sync stays protected
+without requiring opt-in. Pass an absolute `--quota-limit` to override this.
+
+This is checked twice:
+
+- **Before** any work starts (a free `/rate_limit` check that doesn't itself
+  consume quota), so a sync that's already doomed fails fast instead of
+  fetching workflow runs first.
+- **During** the sync, after every API response -- since a single sync can
+  consume far more quota than expected (e.g. an unusually busy day). Runs and
+  jobs already fetched at that point are still saved to the cache before the
+  sync aborts, so nothing already fetched is wasted -- the next sync picks up
+  where this one left off (any run left without jobs is simply re-fetched,
+  since it isn't recognized as "complete" yet).
+
+### Querying
+
+Once `workflows.parquet` is populated, filter it down to answer questions
+like "which jobs failed in the last week" or "which runners are currently
+busy" -- without writing any pyarrow/DuckDB code. A filter can be expressed
+three ways, all compiling to the same `pyarrow.dataset` expressions:
+
+- a fluent Python builder (`WorkflowQuery`), for ad-hoc use in scripts/notebooks;
+- a declarative YAML/JSON **spec file**, for anything that needs to be
+  supplied dynamically (a CLI flag, a saved config, ...) -- and reused as-is
+  by both the `query` CLI command and `cimon visualize` (see
+  [Visualizations](#visualizations) below);
+- the `cimon query` CLI command, which applies a spec file to a Parquet cache
+  and writes the filtered rows to a new Parquet file.
+
+#### Example: filtering with a spec file
+
+```yaml
+# tests/example_specs/filter_by_job_name.yml
+all:
+  - column: created_at
+    op: between
+    value: ["2026-08-01T00:00:00Z", "2026-08-31T23:59:59Z"]
+  - column: job_conclusion
+    op: eq
+    value: success
+  - column: job_name
+    op: contains
+    value: "Build"
+```
+
+```bash
+uv run cimon query -i workflows.parquet -s tests/example_specs/filter_by_job_name.yml -o out/filtered.parquet
+```
+
+```bash
+Wrote 128 filtered row(s) to out/filtered.parquet
+```
+
+Add `-c/--column` (repeatable) to restrict the output to specific columns,
+e.g. `-c run_id -c job_name -c job_duration_sec`.
+
+#### Example: filtering from Python
+
+```python
+from cimon.workflows.query import WorkflowQuery
+
+rows = (
+    WorkflowQuery("workflows.parquet")
+    .job_status("in_progress")
+    .runner_label("app-adas-src")
+    .columns("run_id", "job_name", "job_runner_labels")
+    .to_pylist()
+)
+```
+
+Each row is one **job** belonging to one **run** (run-level columns like
+`run_id`/`workflow_status`/`created_at` repeat across every job row of that
+run). See
+[Querying the workflows cache](docs/references/workflow-query.md) for the
+full row layout, the complete list of supported operators (`eq`, `between`,
+`contains`, `list_contains`, ...), and more `WorkflowQuery` examples.
+
 ## Features
 
 

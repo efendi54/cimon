@@ -29,7 +29,13 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import requests
 
-from cimon.github_api import api_get, create_session, load_etag_cache, save_etag_cache
+from cimon.github_api import (
+    QuotaLimitReachedError,
+    api_get,
+    create_session,
+    load_etag_cache,
+    save_etag_cache,
+)
 from cimon.workflows.models import (
     JobEntry,
     JobInfo,
@@ -56,6 +62,10 @@ GITHUB_API_RESULT_CAP = 1000
 # Job-level statuses that mean a run is still active, used for the
 # date-independent "active runs" scan (see iter_runs_by_status).
 ACTIVE_RUN_STATUSES = ("in_progress", "queued")
+# Default --quota-limit fraction (of the token's actual rate limit ceiling)
+# used when the user doesn't pass an explicit absolute value, so every sync
+# stays protected without requiring opt-in.
+DEFAULT_QUOTA_LIMIT_FRACTION = 0.1
 
 PARQUET_SCHEMA = pa.schema(
     [
@@ -225,27 +235,34 @@ def scan_active_runs(
     """
     Fetch currently active runs (see ACTIVE_RUN_STATUSES) not already in `known_run_ids`.
 
-    Extends `known_run_ids` in place with the IDs of any runs found.
+    Extends `known_run_ids` in place with the IDs of any runs found. If the
+    configured quota limit is hit partway through, the runs found so far are
+    attached to the raised `QuotaLimitReachedError` as `.partial_runs` instead
+    of being discarded.
     """
     active_runs = []
 
-    for status in ACTIVE_RUN_STATUSES:
-        for run in iter_runs_by_status(
-            session,
-            base_url,
-            owner,
-            repo,
-            workflow_id,
-            status,
-            max_pages,
-            etag_cache=etag_cache,
-        ):
-            run_id = str(run["id"])
-            if run_id in known_run_ids:
-                continue
+    try:
+        for status in ACTIVE_RUN_STATUSES:
+            for run in iter_runs_by_status(
+                session,
+                base_url,
+                owner,
+                repo,
+                workflow_id,
+                status,
+                max_pages,
+                etag_cache=etag_cache,
+            ):
+                run_id = str(run["id"])
+                if run_id in known_run_ids:
+                    continue
 
-            known_run_ids.add(run_id)
-            active_runs.append(run)
+                known_run_ids.add(run_id)
+                active_runs.append(run)
+    except QuotaLimitReachedError as exc:
+        exc.partial_runs = active_runs
+        raise
 
     return active_runs
 
@@ -1013,6 +1030,20 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         help="Directory where caching related files will be written into.",
     )
 
+    parser.add_argument(
+        "--quota-limit",
+        type=int,
+        default=None,
+        # argparse does its own %-substitution on help strings, so a literal
+        # "%" (from the percent computed above) must be escaped as "%%".
+        help="Abort the sync as soon as the remaining GitHub API quota drops "
+        "to/below this value (e.g. 200), instead of running until the API "
+        f"itself starts rejecting requests. Defaults to {DEFAULT_QUOTA_LIMIT_FRACTION:.0%}".replace(
+            "%", "%%"
+        )
+        + " of the token's actual rate limit ceiling if not given.",
+    )
+
     args = parser.parse_args(argv)
 
     token = args.token
@@ -1033,6 +1064,29 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     base_url = f"https://{host}/api/v3"
 
     session = create_session(token)
+
+    # Determine the effective quota-abort threshold: an explicit --quota-limit
+    # always wins; otherwise default to DEFAULT_QUOTA_LIMIT_FRACTION of the
+    # token's actual rate limit ceiling, so every sync stays protected even
+    # without opting in explicitly. This single /rate_limit call (free, does
+    # not itself consume quota) also serves as the fail-fast pre-flight check.
+    core = api_get(session, f"{base_url}/rate_limit", retries=1).json()["resources"]["core"]
+
+    if args.quota_limit is not None:
+        quota_limit = args.quota_limit
+    else:
+        quota_limit = round(core["limit"] * DEFAULT_QUOTA_LIMIT_FRACTION)
+        logger.info(
+            f"No --quota-limit given; defaulting to {quota_limit} "
+            f"({DEFAULT_QUOTA_LIMIT_FRACTION:.0%} of the {core['limit']} quota limit)",
+        )
+
+    session.quota_limit = quota_limit
+
+    if core["remaining"] <= quota_limit:
+        msg = f"GitHub API quota limit reached: {core['remaining']} remaining <= configured limit {quota_limit}"
+        logger.warning(msg)
+        raise QuotaLimitReachedError(msg)
 
     # ------------------------------------------------------------------
     # Cache paths
@@ -1089,6 +1143,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     cached_runs: dict[str, RunEntry] = {}
 
+    # Set once the configured --quota-limit is hit; from that point on, no
+    # further API-consuming stages are attempted, but everything fetched so
+    # far is still saved below before this is re-raised at the very end.
+    quota_exceeded: QuotaLimitReachedError | None = None
+
     # ------------------------------------------------------------------
     # Fetch workflow runs
     #
@@ -1102,27 +1161,31 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     )
     logger.info(f"Date range: {args.from_date} .. {args.to_date} ...")
 
-    runs = None
+    runs: list[dict] = []
     fetch_error = None
     fetch_done = threading.Event()
 
     def fetch_workflow_runs() -> None:
-        nonlocal runs, fetch_error
+        nonlocal fetch_error, quota_exceeded
 
         try:
-            runs = list(
-                iter_runs(
-                    session,
-                    base_url,
-                    args.owner,
-                    args.repo,
-                    workflow["id"],
-                    args.from_date,
-                    args.to_date,
-                    args.max_pages,
-                    etag_cache=etag_cache_view,
-                ),
-            )
+            # Appended one-by-one (not `runs = list(iter_runs(...))`) so that
+            # runs fetched before a mid-iteration QuotaLimitReachedError
+            # aren't discarded along with the exception.
+            for run in iter_runs(
+                session,
+                base_url,
+                args.owner,
+                args.repo,
+                workflow["id"],
+                args.from_date,
+                args.to_date,
+                args.max_pages,
+                etag_cache=etag_cache_view,
+            ):
+                runs.append(run)  # noqa: PERF402
+        except QuotaLimitReachedError as error:
+            quota_exceeded = error
         except (requests.RequestException, RuntimeError) as error:
             fetch_error = error
         finally:
@@ -1157,7 +1220,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         sys.stdout.flush()
         raise fetch_error
 
-    sys.stdout.write(f"\rFetching workflow runs ... done ({len(runs)} runs found)\n")
+    if quota_exceeded is not None:
+        sys.stdout.write(
+            f"\rFetching workflow runs ... quota limit reached ({len(runs)} run(s) fetched so far)\n"
+        )
+    else:
+        sys.stdout.write(f"\rFetching workflow runs ... done ({len(runs)} runs found)\n")
     sys.stdout.flush()
 
     # ------------------------------------------------------------------
@@ -1170,23 +1238,29 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     known_run_ids = {str(run["id"]) for run in runs}
-    active_runs = scan_active_runs(
-        session,
-        base_url,
-        args.owner,
-        args.repo,
-        workflow["id"],
-        known_run_ids,
-        args.max_pages,
-        etag_cache=etag_cache_view,
-    )
 
-    if active_runs:
-        logger.info(
-            f"Active-run scan found {len(active_runs)} additional run(s) "
-            "outside the requested date range",
-        )
-        runs.extend(active_runs)
+    if quota_exceeded is None:
+        try:
+            active_runs = scan_active_runs(
+                session,
+                base_url,
+                args.owner,
+                args.repo,
+                workflow["id"],
+                known_run_ids,
+                args.max_pages,
+                etag_cache=etag_cache_view,
+            )
+        except QuotaLimitReachedError as exc:
+            quota_exceeded = exc
+            active_runs = exc.partial_runs
+
+        if active_runs:
+            logger.info(
+                f"Active-run scan found {len(active_runs)} additional run(s) "
+                "outside the requested date range",
+            )
+            runs.extend(active_runs)
 
     # ------------------------------------------------------------------
     # Reconcile stale locally-active runs
@@ -1210,20 +1284,24 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     ]
     stale_active_run_ids = find_stale_active_run_ids(own_parquet_rows, known_run_ids)
 
-    if stale_active_run_ids:
+    if quota_exceeded is None and stale_active_run_ids:
         logger.info(
             f"Reconciling {len(stale_active_run_ids)} run(s) cached as "
             "queued/in_progress but missed by the date range and active-run scan",
         )
         for run_id in stale_active_run_ids:
-            run = fetch_run(
-                session,
-                base_url,
-                args.owner,
-                args.repo,
-                run_id,
-                etag_cache=etag_cache_view,
-            )
+            try:
+                run = fetch_run(
+                    session,
+                    base_url,
+                    args.owner,
+                    args.repo,
+                    run_id,
+                    etag_cache=etag_cache_view,
+                )
+            except QuotaLimitReachedError as exc:
+                quota_exceeded = exc
+                break
             runs.append(run)
             known_run_ids.add(run_id)
 
@@ -1288,7 +1366,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     logger.info(f"Workflow runs requiring job update: {len(runs_to_process)}")
 
-    if runs_to_process:
+    if quota_exceeded is not None and runs_to_process:
+        logger.info(
+            f"Skipping job update for {len(runs_to_process)} run(s): quota limit already reached",
+        )
+
+    if runs_to_process and quota_exceeded is None:
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             futures = {
                 executor.submit(
@@ -1306,7 +1389,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             for future in as_completed(futures):
                 run = futures[future]
                 run_id = str(run["id"])
-                jobs = future.result()
+
+                try:
+                    jobs = future.result()
+                except QuotaLimitReachedError as exc:
+                    if quota_exceeded is None:
+                        quota_exceeded = exc
+                        # Stop handing out not-yet-started work; threads already
+                        # in flight are left to finish (or hit the same limit).
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    continue
+
                 cached = cached_runs[run_id]
 
                 # Replace the complete job snapshot.
@@ -1343,6 +1436,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     logger.info(f"    Runs:     {len(runs)} ({new_runs} new, {known_runs} known)")
     logger.info(f"Cache:        {parquet_file} ({format_file_size(parquet_file)})")
     log_parquet_cache_overview(str(parquet_file))
+
+    if quota_exceeded is not None:
+        logger.warning(
+            "Sync aborted early: %s. Progress made before the limit was hit has "
+            "been saved above; re-run to pick up where this left off.",
+            quota_exceeded,
+        )
+        raise quota_exceeded
 
     # def test_query(parquet_file: Path) -> None:
 

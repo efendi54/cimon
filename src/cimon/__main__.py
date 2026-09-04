@@ -10,7 +10,7 @@ import yaml
 
 import requests
 from cimon.call_graph.call_graph import MermaidCallGraphMode, generate_mermaid_graph
-from cimon.github_api import create_session, print_quota
+from cimon.github_api import QuotaLimitReachedError, create_session, print_quota
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
@@ -150,7 +150,11 @@ def quota(token: str | None, host: str | None) -> None:
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def sync(args: tuple[str, ...]) -> None:
     """Run the workflow-run cache synchronizer."""
-    synch.main(list(args))
+    try:
+        synch.main(list(args))
+    except QuotaLimitReachedError:
+        logger.exception("Sync aborted")
+        raise click.Abort from None
 
 
 @main.command("cache-info")

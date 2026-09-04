@@ -1,0 +1,5 @@
+# Adjust the `between` range below to today's date.
+all:
+  - column: created_at
+    op: between
+    value: ["2026-09-04T00:00:00Z", "2026-09-04T23:59:59Z"]

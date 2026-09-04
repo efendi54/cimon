@@ -1,0 +1,10 @@
+all:
+  - column: event
+    op: eq
+    value: "merge_group"
+  - column: job_status
+    op: eq
+    value: "completed"
+  - column: job_conclusion
+    op: eq
+    value: "failure"

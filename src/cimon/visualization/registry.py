@@ -76,6 +76,12 @@ def _render_job_durations(table: pa.Table, output_dir: Path) -> None:
     render(table, output_dir)
 
 
+def _render_merge_group_failures(table: pa.Table, output_dir: Path) -> None:
+    from cimon.visualization.renderers.merge_group_failures import render  # noqa: PLC0415
+
+    render(table, output_dir)
+
+
 register(
     Visualization(
         name="runner-utilization",
@@ -89,5 +95,13 @@ register(
         name="job-durations",
         spec_path=SPECS_DIR / "job_durations.yml",
         render=_render_job_durations,
+    ),
+)
+
+register(
+    Visualization(
+        name="merge-group-failures",
+        spec_path=SPECS_DIR / "merge_group_failures.yml",
+        render=_render_merge_group_failures,
     ),
 )

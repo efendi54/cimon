@@ -10,16 +10,21 @@ import yaml
 
 import requests
 from cimon.github_api import (
+    RUNNER_STATUS_PARQUET_FILE_NAME,
+    RUNNER_STATUS_SNAPSHOTS_DIR_NAME,
     QuotaLimitReachedError,
+    append_runner_snapshot,
     create_session,
     list_runners,
     print_quota,
     print_runner_status,
     render_runner_status_chart,
+    render_runner_status_trend,
 )
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
+from cimon.workflows.build_metrics import process_input as run_build_metrics
 from cimon.workflows.query import WorkflowQuery
 
 logger = logging.getLogger(__name__)
@@ -111,6 +116,13 @@ def quota(token: str | None, host: str | None) -> None:
     type=click.Path(dir_okay=False, path_type=Path),
     help="Also write an HTML treemap of runner labels/names colored by status to this file. Requires the 'viz' extra.",
 )
+@click.option(
+    "--cache-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.home() / ".cache/cimon",
+    help="Directory to record this call's runner-status snapshot in "
+    "(runner_status.parquet plus a timestamped JSON file under runner_status_snapshots/).",
+)
 def runners(
     token: str | None,
     host: str | None,
@@ -118,6 +130,7 @@ def runners(
     owner: str | None,
     repo: str | None,
     output_path: Path | None,
+    cache_dir: Path,
 ) -> None:
     """Show self-hosted runner status: online/offline counts, and which online runners are busy."""
     if not token:
@@ -139,12 +152,67 @@ def runners(
         session = create_session(token)
         runner_list = list_runners(session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo)
         print_runner_status(runner_list)
+
+        snapshot_file = append_runner_snapshot(
+            runner_list,
+            cache_dir / RUNNER_STATUS_PARQUET_FILE_NAME,
+            cache_dir / RUNNER_STATUS_SNAPSHOTS_DIR_NAME,
+        )
+        logger.info(f"Wrote snapshot {snapshot_file}")
+
         if output_path:
             render_runner_status_chart(runner_list, output_path)
             logger.info(f"Wrote {output_path}")
     except requests.RequestException:
         logger.exception("Failed to fetch runner status")
         raise click.Abort from None
+
+
+@main.command("runner-status-trend")
+@click.option(
+    "--cache-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.home() / ".cache/cimon",
+    help="Directory containing runner_status.parquet, as recorded by repeated 'cimon runners' calls.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Write the per-runner status/busy trend chart (HTML) to this file. Requires the 'viz' extra.",
+)
+def runner_status_trend(cache_dir: Path, output_path: Path) -> None:
+    """Plot each runner's recorded status/busy history over time, one row per runner."""
+    cache_path = cache_dir / RUNNER_STATUS_PARQUET_FILE_NAME
+    if not cache_path.exists():
+        msg = f"No runner-status snapshots found at {cache_path}. Run 'cimon runners' a few times first."
+        raise click.UsageError(msg)
+
+    render_runner_status_trend(cache_path, output_path)
+    logger.info(f"Wrote {output_path}")
+
+
+@main.command("build-metrics")
+@click.argument("input_arg", metavar="INPUT")
+@click.argument(
+    "output_dir",
+    metavar="[OUTPUT_DIR]",
+    required=False,
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("/tmp"),
+)
+def build_metrics(input_arg: str, output_dir: Path) -> None:
+    """Extract bazel build cache-hit-rate/duration metrics from job log(s).
+
+    INPUT is a workflow-job URL, a JSON file listing job runs, or a Parquet
+    file with a job_url column (e.g. from 'cimon query -c job_url'). Given
+    multiple jobs, also writes an aggregated cache-hit-rate-trend.html
+    (requires the 'viz' extra). See cimon.workflows.build_metrics for
+    details. OUTPUT_DIR defaults to /tmp.
+    """
+    run_build_metrics(input_arg, output_dir)
 
 
 @main.command(

@@ -21,7 +21,7 @@ cache and builds tooling on top of it:
   files, or the `query` CLI command) to answer questions like "which jobs
   failed in the last week" or "which runners are currently busy".
 - **Visualizing** -- turn filtered cache data into charts (job durations,
-  runner utilization, ...) through a small, pluggable rendering pipeline.
+  merge-group failures, ...) through a small, pluggable rendering pipeline.
 - **Call graphs** -- render a workflow's job/reusable-workflow structure as a
   Mermaid diagram, to understand how its jobs and called workflows relate.
 
@@ -271,7 +271,6 @@ Currently registered:
 
 | Name | Spec | What it shows |
 |---|---|---|
-| `runner-utilization` | [`runner_utilization.yml`](src/cimon/visualization/specs/runner_utilization.yml) | number of concurrently active runners over time, per exact `job_runner_labels` combination |
 | `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed (successful) or still-running jobs -- one HTML page per workflow |
 
 ### Adding a new visualization

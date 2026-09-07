@@ -64,12 +64,6 @@ def _not_implemented(_table: pa.Table, _output_dir: Path) -> None:
     raise NotImplementedError(msg)
 
 
-def _render_runner_utilization(table: pa.Table, output_dir: Path) -> None:
-    from cimon.visualization.renderers.runner_utilization import render  # noqa: PLC0415
-
-    render(table, output_dir)
-
-
 def _render_job_durations(table: pa.Table, output_dir: Path) -> None:
     from cimon.visualization.renderers.job_durations import render  # noqa: PLC0415
 
@@ -81,14 +75,6 @@ def _render_merge_group_failures(table: pa.Table, output_dir: Path) -> None:
 
     render(table, output_dir)
 
-
-register(
-    Visualization(
-        name="runner-utilization",
-        spec_path=SPECS_DIR / "runner_utilization.yml",
-        render=_render_runner_utilization,
-    ),
-)
 
 register(
     Visualization(

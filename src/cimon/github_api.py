@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import requests
+
+from cimon.parquet_io import write_table_atomic
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping
@@ -235,6 +239,125 @@ def print_runner_status(runners: list[dict[str, Any]]) -> None:
     for runner in sorted(runners, key=lambda r: (r.get("status", ""), not r.get("busy", False), r.get("name", ""))):
         state = "busy" if runner.get("busy") else "idle" if runner.get("status") == "online" else "-"
         logger.info("  %-8s %-4s %s", runner.get("status"), state, runner.get("name"))
+
+
+RUNNER_STATUS_PARQUET_FILE_NAME = "runner_status.parquet"
+RUNNER_STATUS_SNAPSHOTS_DIR_NAME = "runner_status_snapshots"
+
+
+def save_runner_snapshot(runners: list[dict[str, Any]], snapshots_dir: Path) -> Path:
+    """Package a runner-status poll as JSON (`{polled_at, runners}`) and write it to its own file.
+
+    Kept as a lossless, timestamp-named archive under `snapshots_dir` -- one
+    file per poll -- separate from the flattened Parquet index, so later
+    analyses (e.g. reintroducing a time-series view) aren't limited to
+    whatever columns the Parquet cache happens to have today.
+    """
+    snapshot = {
+        "polled_at": dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "runners": runners,
+    }
+
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = snapshots_dir / f"{snapshot['polled_at'].replace(':', '')}.json"
+    snapshot_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+
+    return snapshot_path
+
+
+def append_runner_snapshot(runners: list[dict[str, Any]], cache_path: Path, snapshots_dir: Path) -> Path:
+    """Persist a runner-status poll as JSON, then fold that same JSON into the Parquet cache.
+
+    Each call adds one row per runner (`polled_at`, `runner_name`, `status`,
+    `busy`, `labels`) to `cache_path`, creating it on first use. Kept separate
+    from workflows.parquet: unlike workflow-run history, GitHub does not
+    retain past runner status, so this can only ever be built up going
+    forward from repeated `cimon runners` calls, one snapshot at a time.
+
+    Returns the path of the JSON snapshot file written for this poll.
+    """
+    snapshot_path = save_runner_snapshot(runners, snapshots_dir)
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    new_rows = pa.table(
+        {
+            "polled_at": [snapshot["polled_at"]] * len(snapshot["runners"]),
+            "runner_name": [r.get("name") for r in snapshot["runners"]],
+            "status": [r.get("status") for r in snapshot["runners"]],
+            "busy": [bool(r.get("busy")) for r in snapshot["runners"]],
+            "labels": [[label.get("name") for label in (r.get("labels") or [])] for r in snapshot["runners"]],
+        },
+    )
+
+    if cache_path.exists():
+        new_rows = pa.concat_tables([pq.read_table(cache_path), new_rows], promote_options="default")
+
+    write_table_atomic(new_rows, cache_path)
+
+    return snapshot_path
+
+
+def render_runner_status_trend(cache_path: Path, output_path: Path) -> None:
+    """Plot each runner's recorded status/busy history over time as its own row.
+
+    Reads the snapshot history built up by `append_runner_snapshot()`. One
+    row (y-category) per runner name, one marker per poll colored by state
+    (offline/online-idle/online-busy) and connected by a thin line, so each
+    runner's own timeline reads at a glance. Requires the `viz` extra
+    (`pandas`, `plotly`), imported lazily so the rest of this module keeps
+    working without it installed.
+    """
+    import pandas as pd  # noqa: PLC0415
+    import plotly.graph_objects as go  # noqa: PLC0415
+
+    frame = pq.read_table(cache_path).to_pandas()
+
+    if frame.empty:
+        go.Figure(layout={"title": "No runner-status snapshots recorded yet"}).write_html(output_path)
+        return
+
+    frame["polled_at"] = pd.to_datetime(frame["polled_at"])
+    frame["state"] = [
+        "offline" if status != "online" else ("online (busy)" if busy else "online (idle)")
+        for status, busy in zip(frame["status"], frame["busy"])
+    ]
+    frame = frame.sort_values("polled_at")
+
+    colors = {
+        "online (idle)": "#2ca02c",
+        "online (busy)": "#ff7f0e",
+        "offline": "#d62728",
+    }
+
+    figure = go.Figure()
+
+    runner_names = sorted(frame["runner_name"].unique())
+    for runner_name in runner_names:
+        runner_rows = frame[frame["runner_name"] == runner_name]
+        figure.add_trace(
+            go.Scatter(
+                x=runner_rows["polled_at"],
+                y=[runner_name] * len(runner_rows),
+                mode="lines+markers",
+                line={"color": "lightgray", "width": 1},
+                marker={"color": [colors[state] for state in runner_rows["state"]], "size": 10},
+                showlegend=False,
+                hovertemplate="%{y}<br>%{x}<extra></extra>",
+            ),
+        )
+
+    # Invisible points, only to add a color-key legend for the states above.
+    for state, color in colors.items():
+        figure.add_trace(
+            go.Scatter(x=[None], y=[None], mode="markers", marker={"color": color, "size": 10}, name=state),
+        )
+
+    figure.update_layout(
+        title="Runner status over time",
+        height=max(300, 24 * len(runner_names) + 150),
+        yaxis={"type": "category"},
+    )
+    figure.write_html(output_path)
 
 
 def _runner_state(runner: Mapping[str, Any]) -> str:

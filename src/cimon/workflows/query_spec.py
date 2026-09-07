@@ -19,9 +19,8 @@ starts_with, contains, list_contains.
 
 Relative date placeholders: a string value matching `now`, `today`,
 `today_start`, `today_end`, or `today[+-]<N>d[_start|_end]` is resolved to an
-actual UTC ISO-8601 timestamp at build time (see `_resolve_value`), so specs
-like a runner-utilization window don't need their date range hand-edited on
-every run:
+actual UTC ISO-8601 timestamp at build time (see `_resolve_value`), so a
+"last N days" spec doesn't need its date range hand-edited on every run:
     ```yaml
     all:
       - column: created_at

@@ -141,9 +141,7 @@ that goes stale:
 
 Any string that doesn't match one of these forms (e.g. a real timestamp, or
 an unrelated value like a job name) is left untouched. This means a
-"last N days" spec like
-[runner_utilization.yml](../../src/cimon/visualization/specs/runner_utilization.yml)
-never needs its date range manually bumped:
+"last N days" spec never needs its date range manually bumped:
 
 ```yaml
 all:

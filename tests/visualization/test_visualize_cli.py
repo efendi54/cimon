@@ -51,7 +51,7 @@ def test_visualize_command_list_flag() -> None:
     result = CliRunner().invoke(main, ["visualize", "--list"])
 
     assert result.exit_code == 0, result.output
-    assert "runner-utilization" in result.output
+    assert "job-durations" in result.output
 
 
 def test_visualize_command_unknown_name(tmp_path: Path) -> None:

@@ -1,0 +1,10 @@
+all:
+  - column: created_at
+    op: between
+    value: ["2026-09-04T00:00:00Z", "2026-09-04T23:59:59Z"]
+  - column: job_conclusion
+    op: eq
+    value: success
+  - column: job_name
+    op: contains
+    value: "Sequential"

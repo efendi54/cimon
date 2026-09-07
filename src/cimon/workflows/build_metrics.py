@@ -8,6 +8,17 @@
 
 The script downloads the job log, extracts build metrics, and generates a JSON file and a Markdown summary table.
 Additionally it checks for the existence of a 'build-profiles' artifact and downloads it too if available.
+
+When given a JSON file listing multiple job runs instead of a single URL (see
+`process_input`), it additionally aggregates every (target, config) data point
+across all those runs into an HTML trend chart of cache-hit rate and build
+duration over time. Requires the `viz` extra (`pandas`, `plotly`) for that
+chart; the rest of the script works without it.
+
+A Parquet file with a `job_url` string column (e.g. produced by
+`cimon query -c job_url`) is accepted the same way as the JSON array. If it
+also has a `job_runner_name` column, an additional `runner-cache-health.html`
+chart is generated, breaking cache-hit rate down per runner.
 """
 
 import json
@@ -123,8 +134,8 @@ def get_job_info(
     completed = parse_ts(job["completed_at"])
 
     return {
-        "job-name": job["name"],
-        "duration_sec": (completed - started).total_seconds(),
+        "job_name": job["name"],
+        "job_active_duration_sec": (completed - started).total_seconds(),
     }
 
 
@@ -208,7 +219,8 @@ def download_build_profiles_if_exists(
     print(f"Downloaded artifact to {target}")
 
 
-def get_bazel_targets_argument(command_line: str) -> list[str]:
+def parse_bazel_build_args(command_line: str) -> tuple[list[str], list[str]]:
+    """Extract the target patterns and `--config` values from a 'bazel build ...' command line."""
     args = shlex.split(command_line)
 
     try:
@@ -218,7 +230,8 @@ def get_bazel_targets_argument(command_line: str) -> list[str]:
 
     args = args[build_index + 1:]
 
-    targets = []
+    targets: list[str] = []
+    configs: list[str] = []
 
     i = 0
     while i < len(args):
@@ -226,21 +239,32 @@ def get_bazel_targets_argument(command_line: str) -> list[str]:
 
         # --target_pattern_file=<file>
         if arg.startswith("--target_pattern_file="):
-            return [arg.split("=", 1)[1]]
+            return [arg.split("=", 1)[1]], configs
 
         # --target_pattern_file <file>
         if arg == "--target_pattern_file":
             if i + 1 >= len(args):
                 raise ValueError("--target_pattern_file specified without filename.")
-            return [args[i + 1]]
+            return [args[i + 1]], configs
+
+        # --config=<name>
+        if arg.startswith("--config="):
+            configs.append(arg.split("=", 1)[1])
+
+        # --config <name>
+        elif arg == "--config":
+            if i + 1 >= len(args):
+                raise ValueError("--config specified without a value.")
+            configs.append(args[i + 1])
+            i += 1
 
         # Bazel target
-        if arg.startswith("//") or arg.startswith("@"):
+        elif arg.startswith("//") or arg.startswith("@"):
             targets.append(arg)
 
         i += 1
 
-    return targets
+    return targets, configs
 
 
 def parse_log(logfile: Path) -> list[dict[str, Any]]:
@@ -273,7 +297,7 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                     "start_ts": parse_ts(bm.group("ts")).isoformat(),
                     "build_line": line.strip(),
                 }
-                current["targets"] = get_bazel_targets_argument(line)
+                current["targets"], current["configs"] = parse_bazel_build_args(line)
                 continue
 
             im = INFO_RE.search(line)
@@ -315,17 +339,18 @@ def generate_md_table_entries(
     job_info: dict[str, Any],
 ) -> str:
     md = [
-        f"# {job_info['job-name']}\n",
-        f'**URL:** <{job_info["job-html-url"]}>\n',
-        f'**Duration:** {fmt(job_info["duration_sec"])}\n',
+        f"# {job_info['job_name']}\n",
+        f'**URL:** <{job_info["job_url"]}>\n',
+        f'**Duration:** {fmt(job_info["job_active_duration_sec"])}\n',
         "",
-        "Target | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Target | Config | Duration | Cache Hit Rate | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     for b in builds:
         duration = b["duration_sec"]
         c = b["cache"]
+        config = "+".join(b["configs"]) if b["configs"] else "-"
 
         total = (
             c["action"]
@@ -353,6 +378,7 @@ def generate_md_table_entries(
         for target in b["targets"]:
             md.append(
                 f"| {target} "
+                f"| {config} "
                 f"| {fmt(duration)} "
                 f"| **{rate:.1f}%** "
                 f"| {c['action']} "
@@ -368,10 +394,208 @@ def generate_md_table_entries(
     return "\n".join(md)
 
 
-def main(
+def flatten_metric_rows(
+    builds: list[dict[str, Any]],
+    job_info: dict[str, Any],
     workflow_url: str,
-    output_root: Path = Path("/tmp"),
-) -> int:
+    runner_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Flatten parsed builds into one row per (target, config) data point, for trend analysis."""
+    rows: list[dict[str, Any]] = []
+
+    for b in builds:
+        c = b["cache"]
+        total = c["action"] + c["remote"] + c["internal"] + c["sandbox"] + c["local"]
+        hits = c["action"] + c["remote"]
+        rate = hits / total * 100.0 if total else 0.0
+        # Only the `action` (local, on-disk) cache is tied to the runner's own
+        # disk state; `remote` is a shared cache, so this rate is what
+        # actually reflects a given runner's local-cache health.
+        action_hit_rate = c["action"] / total * 100.0 if total else 0.0
+        config = "+".join(b["configs"]) if b["configs"] else "-"
+
+        for target in b["targets"]:
+            rows.append(
+                {
+                    "job_run_url": workflow_url,
+                    "job_name": job_info["job_name"],
+                    "runner_name": runner_name,
+                    "start_ts": b["start_ts"],
+                    "target": target,
+                    "config": config,
+                    "duration_sec": b["duration_sec"],
+                    "hit_rate": rate,
+                    "action_hit_rate": action_hit_rate,
+                    "hits": hits,
+                    "total": total,
+                },
+            )
+
+    return rows
+
+
+def render_hit_rate_trend(rows: list[dict[str, Any]], output_path: Path) -> None:
+    """Plot cache-hit rate and build duration over time, one line per (target, config).
+
+    Requires the `viz` extra (`pandas`, `plotly`), imported lazily so the rest
+    of this script keeps working without it installed.
+    """
+    from itertools import cycle  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
+    import plotly.express as px  # noqa: PLC0415
+    import plotly.graph_objects as go  # noqa: PLC0415
+    from plotly.subplots import make_subplots  # noqa: PLC0415
+
+    if not rows:
+        go.Figure(layout={"title": "No build data in range"}).write_html(output_path)
+        print(f"Wrote {output_path}")
+        return
+
+    frame = pd.DataFrame(rows)
+    frame["start_ts"] = pd.to_datetime(frame["start_ts"])
+    frame["series"] = frame["target"] + " [" + frame["config"] + "]"
+    frame = frame.sort_values("start_ts")
+
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        subplot_titles=("Cache hit rate (%)", "Build duration (min)"),
+    )
+
+    colors = dict(zip(sorted(frame["series"].unique()), cycle(px.colors.qualitative.Dark24)))
+
+    for series, group in frame.groupby("series"):
+        customdata = group[["job_run_url", "runner_name"]].fillna("(unknown)").to_numpy()
+        figure.add_trace(
+            go.Scatter(
+                x=group["start_ts"],
+                y=group["hit_rate"],
+                mode="lines+markers",
+                name=series,
+                legendgroup=series,
+                marker={"color": colors[series]},
+                customdata=customdata,
+                hovertemplate="%{y:.1f}%<br>runner: %{customdata[1]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=group["start_ts"],
+                y=group["duration_sec"] / 60.0,
+                mode="lines+markers",
+                name=series,
+                legendgroup=series,
+                showlegend=False,
+                marker={"color": colors[series]},
+                customdata=customdata,
+                hovertemplate="%{y:.1f} min<br>runner: %{customdata[1]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>",
+            ),
+            row=2,
+            col=1,
+        )
+
+    figure.update_layout(title="Bazel cache-hit rate & duration over time")
+    figure.update_yaxes(title_text="hit rate (%)", row=1, col=1)
+    figure.update_yaxes(title_text="duration (min)", row=2, col=1)
+    figure.write_html(
+        output_path,
+        post_script=(
+            "document.querySelectorAll('.plotly-graph-div').forEach(function(div) {"
+            "div.on('plotly_click', function(data) {"
+            "var url = data.points[0].customdata[0];"
+            "if (url) { window.open(url, '_blank'); }"
+            "});"
+            "});"
+        ),
+    )
+    print(f"Wrote {output_path}")
+
+
+def render_runner_cache_health(rows: list[dict[str, Any]], output_path: Path) -> None:
+    """Plot cache-hit rate distributions per runner, to spot runners with a cold/ineffective local cache.
+
+    Two box plots side by side: the `action` (local, on-disk) cache-hit rate,
+    which is the component actually tied to a specific runner's disk state,
+    and the overall (action+remote) rate for comparison -- the latter should
+    be roughly runner-independent since it comes from the shared remote
+    cache, so a runner standing out only in the first plot points at that
+    runner's local cache rather than a remote-cache-wide issue.
+
+    Requires the `viz` extra (`pandas`, `plotly`), imported lazily so the rest
+    of this script keeps working without it installed.
+    """
+    from itertools import cycle  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
+    import plotly.express as px  # noqa: PLC0415
+    import plotly.graph_objects as go  # noqa: PLC0415
+    from plotly.subplots import make_subplots  # noqa: PLC0415
+
+    if not rows:
+        go.Figure(layout={"title": "No build data in range"}).write_html(output_path)
+        print(f"Wrote {output_path}")
+        return
+
+    frame = pd.DataFrame(rows)
+    frame["runner_name"] = frame["runner_name"].fillna("(unknown)")
+
+    runners = sorted(frame["runner_name"].unique())
+    colors = dict(zip(runners, cycle(px.colors.qualitative.Dark24)))
+
+    figure = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=("Action (local) cache hit rate (%)", "Overall cache hit rate (%)"),
+    )
+
+    for runner, group in frame.groupby("runner_name"):
+        figure.add_trace(
+            go.Box(
+                y=group["action_hit_rate"],
+                name=runner,
+                legendgroup=runner,
+                marker={"color": colors[runner]},
+                boxpoints="all",
+                jitter=0.4,
+                pointpos=0,
+            ),
+            row=1,
+            col=1,
+        )
+        figure.add_trace(
+            go.Box(
+                y=group["hit_rate"],
+                name=runner,
+                legendgroup=runner,
+                showlegend=False,
+                marker={"color": colors[runner]},
+                boxpoints="all",
+                jitter=0.4,
+                pointpos=0,
+            ),
+            row=1,
+            col=2,
+        )
+
+    figure.update_layout(title="Bazel cache hit rate by runner")
+    figure.update_yaxes(title_text="hit rate (%)", col=1)
+    figure.write_html(output_path)
+    print(f"Wrote {output_path}")
+
+
+def process_job_run(
+    workflow_url: str,
+    output_root: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Download, parse and write per-job JSON/MD outputs for one job run.
+
+    Returns its parsed `builds` and `job_info`, so callers processing several
+    job runs (see `process_input`) can aggregate them without re-parsing.
+    """
     match = WORKFLOW_URL_RE.match(workflow_url)
 
     if not match:
@@ -407,12 +631,12 @@ def main(
         info["repo"],
         info["job_id"],
     )
-    job_info["job-html-url"] = workflow_url
+    job_info["job_url"] = workflow_url
 
     build_metrics = {
-        "job-html-url": workflow_url,
-        "job-name": job_info["job-name"],
-        "duration_sec": job_info["duration_sec"],
+        "job_url": workflow_url,
+        "job_name": job_info["job_name"],
+        "job_active_duration_sec": job_info["job_active_duration_sec"],
         "build_info": builds,
     }
     
@@ -448,7 +672,61 @@ def main(
     print(f"MD  : {md_file}")
     print(f"DIR : {output_dir}")
 
+    return builds, job_info
+
+
+def main(
+    workflow_url: str,
+    output_root: Path = Path("/tmp"),
+) -> int:
+    process_job_run(workflow_url, output_root)
     return 0
+
+
+def _job_entries_from_json(input_path: Path) -> list[dict[str, Any]]:
+    """Read job run URLs (and runner_name, if present) from a JSON array of `{"job": {...}}` entries."""
+    with open(input_path, encoding="utf-8") as f:
+        entries = json.load(f)
+
+    if not isinstance(entries, list):
+        raise ValueError("JSON must contain an array.")
+
+    jobs: list[dict[str, Any]] = []
+
+    for info in entries:
+        if not isinstance(info, dict) or not isinstance(info.get("job"), dict) or "html_url" not in info["job"]:
+            continue
+
+        job = info["job"]
+        url = job["html_url"]
+        if not isinstance(url, str):
+            raise ValueError(f"Job run URL {url!r} is not a string.")
+
+        jobs.append({"job_url": url, "runner_name": job.get("runner_name")})
+
+    return jobs
+
+
+def _job_entries_from_parquet(
+    input_path: Path,
+    url_column: str = "job_url",
+    runner_column: str = "job_runner_name",
+) -> list[dict[str, Any]]:
+    """Read job run URLs (and runner_name, if present) from a Parquet file (e.g. from `cimon query`)."""
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    has_runner_column = runner_column in pq.ParquetFile(input_path).schema_arrow.names
+    columns = [url_column, runner_column] if has_runner_column else [url_column]
+
+    table = pq.read_table(input_path, columns=columns)
+    urls = table.column(url_column).to_pylist()
+    runner_names = table.column(runner_column).to_pylist() if has_runner_column else [None] * len(urls)
+
+    return [
+        {"job_url": url, "runner_name": runner_name}
+        for url, runner_name in zip(urls, runner_names)
+        if url
+    ]
 
 
 def process_input(
@@ -462,28 +740,41 @@ def process_input(
 
     if not input_path.is_file():
         raise ValueError(
-            f"'{input_arg}' is neither a workflow URL nor a JSON file."
+            f"'{input_arg}' is neither a workflow URL, a JSON file, nor a Parquet file."
         )
 
-    with open(input_path, encoding="utf-8") as f:
-        entries = json.load(f)
+    all_jobs = (
+        _job_entries_from_parquet(input_path)
+        if input_path.suffix == ".parquet"
+        else _job_entries_from_json(input_path)
+    )
 
-    if not isinstance(entries, list):
-        raise ValueError("JSON must contain an array.")
+    rows: list[dict[str, Any]] = []
+    total = len(all_jobs)
 
-    all_job_run_urls = [info.get("job", {}).get("html_url") for info in entries if isinstance(info, dict) and "job" in info and isinstance(info["job"], dict) and "html_url" in info["job"]]
+    if total == 0:
+        print("No job run URLs found in input.")
+        return 0
 
-    for job_run_url in all_job_run_urls:
-        if not isinstance(job_run_url, str):
-            raise ValueError(f"Job run URL {job_run_url} is not a string.")
-
-        workflow_url = job_run_url
+    for index, job in enumerate(all_jobs, start=1):
+        workflow_url = job["job_url"]
+        runner_name = job.get("runner_name")
 
         print("=" * 80)
         print(f"Processing {workflow_url}")
+        print(f"[{index}/{total}] {index / total * 100.0:.1f}% complete")
         print("=" * 80)
 
-        main(workflow_url, output_root)
+        builds, job_info = process_job_run(workflow_url, output_root)
+        rows.extend(flatten_metric_rows(builds, job_info, workflow_url, runner_name))
+
+    trend_file = output_root / "cache-hit-rate-trend.html"
+    render_hit_rate_trend(rows, trend_file)
+    print(f"\nTrend: {trend_file}")
+
+    runner_health_file = output_root / "runner-cache-health.html"
+    render_runner_cache_health(rows, runner_health_file)
+    print(f"Runner cache health: {runner_health_file}")
 
     return 0
 
@@ -491,7 +782,7 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         print(
             f"Usage: {sys.argv[0]} "
-            "<job-run-url | json-file> [output-dir]"
+            "<job-run-url | json-file | parquet-file> [output-dir]"
         )
         sys.exit(1)
 

@@ -171,3 +171,113 @@ def print_quota(session: requests.Session, base_url: str) -> None:
         core["remaining"],
         reset,
     )
+
+
+RUNNERS_API_PER_PAGE = 100
+
+
+def list_runners(
+    session: requests.Session,
+    base_url: str,
+    *,
+    org: str | None = None,
+    owner: str | None = None,
+    repo: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch all self-hosted runners for an org or repo, paginating as needed.
+
+    Either `org`, or both `owner` and `repo`, must be given. Each runner dict
+    has (among others) `name`, `status` ("online"/"offline") and `busy`
+    (whether it's currently executing a job).
+    """
+    if org:
+        path = f"{base_url}/orgs/{org}/actions/runners"
+    elif owner and repo:
+        path = f"{base_url}/repos/{owner}/{repo}/actions/runners"
+    else:
+        msg = "Either 'org' or both 'owner' and 'repo' must be given."
+        raise ValueError(msg)
+
+    runners: list[dict[str, Any]] = []
+    page = 1
+
+    while True:
+        params = {"per_page": RUNNERS_API_PER_PAGE, "page": page}
+        page_runners = api_get(session, path, params=params).json().get("runners", [])
+        runners.extend(page_runners)
+
+        if len(page_runners) < RUNNERS_API_PER_PAGE:
+            break
+
+        page += 1
+
+    return runners
+
+
+def print_runner_status(runners: list[dict[str, Any]]) -> None:
+    """Log a summary of runner online/offline/busy counts, plus a per-runner listing."""
+    online = [r for r in runners if r.get("status") == "online"]
+    offline = [r for r in runners if r.get("status") == "offline"]
+    busy = [r for r in online if r.get("busy")]
+
+    logger.info(
+        "Runner status:\n"
+        "  Total:   %s\n"
+        "  Online:  %s (busy: %s, idle: %s)\n"
+        "  Offline: %s",
+        len(runners),
+        len(online),
+        len(busy),
+        len(online) - len(busy),
+        len(offline),
+    )
+
+    for runner in sorted(runners, key=lambda r: (r.get("status", ""), not r.get("busy", False), r.get("name", ""))):
+        state = "busy" if runner.get("busy") else "idle" if runner.get("status") == "online" else "-"
+        logger.info("  %-8s %-4s %s", runner.get("status"), state, runner.get("name"))
+
+
+def _runner_state(runner: Mapping[str, Any]) -> str:
+    """Classify a runner's current state as offline/online-idle/online-busy."""
+    if runner.get("status") != "online":
+        return "offline"
+    return "online (busy)" if runner.get("busy") else "online (idle)"
+
+
+def render_runner_status_chart(runners: list[dict[str, Any]], output_path: Path) -> None:
+    """Plot a treemap of runner labels -> runner names, colored by current status.
+
+    One row per (label, runner) pair, so a runner with several labels shows
+    up under each of them. This is a live snapshot (not a time series).
+    Requires the `viz` extra (`pandas`, `plotly`), imported lazily so the rest
+    of this module keeps working without it installed.
+    """
+    import pandas as pd  # noqa: PLC0415
+    import plotly.express as px  # noqa: PLC0415
+
+    rows = [
+        {
+            "label": label.get("name", "(no label)"),
+            "runner_name": runner.get("name", "(unknown)"),
+            "state": _runner_state(runner),
+        }
+        for runner in runners
+        for label in (runner.get("labels") or [{"name": "(no label)"}])
+    ]
+
+    if not rows:
+        px.scatter(title="No runners found").write_html(output_path)
+        return
+
+    figure = px.treemap(
+        pd.DataFrame(rows),
+        path=["label", "runner_name"],
+        color="state",
+        color_discrete_map={
+            "online (idle)": "#2ca02c",
+            "online (busy)": "#ff7f0e",
+            "offline": "#d62728",
+        },
+        title="Runner status by label",
+    )
+    figure.write_html(output_path)

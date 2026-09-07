@@ -9,7 +9,14 @@ import click
 import yaml
 
 import requests
-from cimon.github_api import QuotaLimitReachedError, create_session, print_quota
+from cimon.github_api import (
+    QuotaLimitReachedError,
+    create_session,
+    list_runners,
+    print_quota,
+    print_runner_status,
+    render_runner_status_chart,
+)
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
@@ -78,6 +85,65 @@ def quota(token: str | None, host: str | None) -> None:
         print_quota(session, f"https://{host}/api/v3")
     except requests.RequestException:
         logger.exception("Failed to fetch GitHub API quota")
+        raise click.Abort from None
+
+
+@main.command()
+@click.option(
+    "--token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+    help="GitHub API token. Defaults to GH_TOKEN or GITHUB_TOKEN.",
+)
+@click.option(
+    "--host",
+    envvar="GH_HOST",
+    required=False,
+    help="GitHub API host, e.g. git.hub.vwgroup.com. Defaults to GH_HOST.",
+)
+@click.option("--org", help="Organization to list self-hosted runners for, e.g. CAS.")
+@click.option("--owner", help="Repository owner, used with --repo if --org is not given.")
+@click.option("--repo", help="Repository name, used with --owner if --org is not given.")
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Also write an HTML treemap of runner labels/names colored by status to this file. Requires the 'viz' extra.",
+)
+def runners(
+    token: str | None,
+    host: str | None,
+    org: str | None,
+    owner: str | None,
+    repo: str | None,
+    output_path: Path | None,
+) -> None:
+    """Show self-hosted runner status: online/offline counts, and which online runners are busy."""
+    if not token:
+        msg = (
+            "No token provided and no environment variable set. "
+            "Please set GH_TOKEN or GITHUB_TOKEN."
+        )
+        raise click.UsageError(msg)
+
+    if not host:
+        msg = "No host provided and no environment variable set. Please set GH_HOST."
+        raise click.UsageError(msg)
+
+    if not org and not (owner and repo):
+        msg = "Provide either --org, or both --owner and --repo."
+        raise click.UsageError(msg)
+
+    try:
+        session = create_session(token)
+        runner_list = list_runners(session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo)
+        print_runner_status(runner_list)
+        if output_path:
+            render_runner_status_chart(runner_list, output_path)
+            logger.info(f"Wrote {output_path}")
+    except requests.RequestException:
+        logger.exception("Failed to fetch runner status")
         raise click.Abort from None
 
 

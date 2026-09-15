@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 MIN_API_QUOTA = 100
 HTTP_NOT_MODIFIED = 304
+HTTP_FORBIDDEN = 403
+# Upper bound for any single retry sleep (including server-provided
+# Retry-After values), so secondary rate limiting can't block for minutes.
+MAX_RETRY_DELAY_SECONDS = 30
 
 
 class QuotaLimitReachedError(RuntimeError):
@@ -105,8 +109,17 @@ def api_get(
     """
     cache_key = _etag_cache_key(url, params)
     cached = etag_cache.get(cache_key) if etag_cache is not None else None
+    quota_limit = getattr(session, "quota_limit", None)
 
     for attempt in range(retries):
+        # Another thread sharing this session may have already confirmed the
+        # quota is gone (possibly via a secondary-rate-limit response that
+        # carries no X-RateLimit-Remaining header, see below) -- stop here
+        # instead of burning through more requests/retries first.
+        if quota_limit is not None and getattr(session, "_quota_exceeded", False):
+            msg = f"GitHub API quota limit reached: configured limit {quota_limit}"
+            raise QuotaLimitReachedError(msg)
+
         headers = {"If-None-Match": cached["etag"]} if cached else {}
 
         try:
@@ -114,15 +127,15 @@ def api_get(
         except requests.RequestException:
             if attempt == retries - 1:
                 raise
-            time.sleep(2**attempt)
+            time.sleep(min(2**attempt, MAX_RETRY_DELAY_SECONDS))
             continue
 
         remaining = response.headers.get("X-RateLimit-Remaining")
         if remaining and int(remaining) < MIN_API_QUOTA:
             logger.warning("API quota low: %s", remaining)
 
-        quota_limit = getattr(session, "quota_limit", None)
         if remaining and quota_limit is not None and int(remaining) <= quota_limit:
+            session._quota_exceeded = True
             msg = f"GitHub API quota limit reached: {remaining} remaining <= configured limit {quota_limit}"
             raise QuotaLimitReachedError(msg)
 
@@ -133,12 +146,20 @@ def api_get(
                 etag_cache[cache_key] = cached
             return _CachedResponse(cached["body"], response.headers)
 
-        if response.status_code in (429, 500, 502, 503, 504):
+        # Secondary rate limiting (abuse detection) is commonly a 403 with a
+        # Retry-After header but *without* X-RateLimit-Remaining, so the
+        # quota check above can silently miss it -- treat it like 429/5xx.
+        is_secondary_rate_limit = (
+            response.status_code == HTTP_FORBIDDEN and "Retry-After" in response.headers
+        )
+        if response.status_code in (429, 500, 502, 503, 504) or is_secondary_rate_limit:
             if attempt == retries - 1:
                 response.raise_for_status()
 
             retry_after = response.headers.get("Retry-After")
-            delay = int(retry_after) if retry_after else 2**attempt
+            delay = min(
+                int(retry_after) if retry_after else 2**attempt, MAX_RETRY_DELAY_SECONDS
+            )
             logger.warning("Retry %s in %ss", response.status_code, delay)
             time.sleep(delay)
             continue
@@ -236,8 +257,21 @@ def print_runner_status(runners: list[dict[str, Any]]) -> None:
         len(offline),
     )
 
-    for runner in sorted(runners, key=lambda r: (r.get("status", ""), not r.get("busy", False), r.get("name", ""))):
-        state = "busy" if runner.get("busy") else "idle" if runner.get("status") == "online" else "-"
+    for runner in sorted(
+        runners,
+        key=lambda r: (
+            r.get("status", ""),
+            not r.get("busy", False),
+            r.get("name", ""),
+        ),
+    ):
+        state = (
+            "busy"
+            if runner.get("busy")
+            else "idle"
+            if runner.get("status") == "online"
+            else "-"
+        )
         logger.info("  %-8s %-4s %s", runner.get("status"), state, runner.get("name"))
 
 
@@ -265,7 +299,9 @@ def save_runner_snapshot(runners: list[dict[str, Any]], snapshots_dir: Path) -> 
     return snapshot_path
 
 
-def append_runner_snapshot(runners: list[dict[str, Any]], cache_path: Path, snapshots_dir: Path) -> Path:
+def append_runner_snapshot(
+    runners: list[dict[str, Any]], cache_path: Path, snapshots_dir: Path
+) -> Path:
     """Persist a runner-status poll as JSON, then fold that same JSON into the Parquet cache.
 
     Each call adds one row per runner (`polled_at`, `runner_name`, `status`,
@@ -285,12 +321,17 @@ def append_runner_snapshot(runners: list[dict[str, Any]], cache_path: Path, snap
             "runner_name": [r.get("name") for r in snapshot["runners"]],
             "status": [r.get("status") for r in snapshot["runners"]],
             "busy": [bool(r.get("busy")) for r in snapshot["runners"]],
-            "labels": [[label.get("name") for label in (r.get("labels") or [])] for r in snapshot["runners"]],
+            "labels": [
+                [label.get("name") for label in (r.get("labels") or [])]
+                for r in snapshot["runners"]
+            ],
         },
     )
 
     if cache_path.exists():
-        new_rows = pa.concat_tables([pq.read_table(cache_path), new_rows], promote_options="default")
+        new_rows = pa.concat_tables(
+            [pq.read_table(cache_path), new_rows], promote_options="default"
+        )
 
     write_table_atomic(new_rows, cache_path)
 
@@ -313,12 +354,16 @@ def render_runner_status_trend(cache_path: Path, output_path: Path) -> None:
     frame = pq.read_table(cache_path).to_pandas()
 
     if frame.empty:
-        go.Figure(layout={"title": "No runner-status snapshots recorded yet"}).write_html(output_path)
+        go.Figure(
+            layout={"title": "No runner-status snapshots recorded yet"}
+        ).write_html(output_path)
         return
 
     frame["polled_at"] = pd.to_datetime(frame["polled_at"])
     frame["state"] = [
-        "offline" if status != "online" else ("online (busy)" if busy else "online (idle)")
+        "offline"
+        if status != "online"
+        else ("online (busy)" if busy else "online (idle)")
         for status, busy in zip(frame["status"], frame["busy"])
     ]
     frame = frame.sort_values("polled_at")
@@ -340,7 +385,10 @@ def render_runner_status_trend(cache_path: Path, output_path: Path) -> None:
                 y=[runner_name] * len(runner_rows),
                 mode="lines+markers",
                 line={"color": "lightgray", "width": 1},
-                marker={"color": [colors[state] for state in runner_rows["state"]], "size": 10},
+                marker={
+                    "color": [colors[state] for state in runner_rows["state"]],
+                    "size": 10,
+                },
                 showlegend=False,
                 hovertemplate="%{y}<br>%{x}<extra></extra>",
             ),
@@ -349,7 +397,13 @@ def render_runner_status_trend(cache_path: Path, output_path: Path) -> None:
     # Invisible points, only to add a color-key legend for the states above.
     for state, color in colors.items():
         figure.add_trace(
-            go.Scatter(x=[None], y=[None], mode="markers", marker={"color": color, "size": 10}, name=state),
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker={"color": color, "size": 10},
+                name=state,
+            ),
         )
 
     figure.update_layout(
@@ -367,7 +421,9 @@ def _runner_state(runner: Mapping[str, Any]) -> str:
     return "online (busy)" if runner.get("busy") else "online (idle)"
 
 
-def render_runner_status_chart(runners: list[dict[str, Any]], output_path: Path) -> None:
+def render_runner_status_chart(
+    runners: list[dict[str, Any]], output_path: Path
+) -> None:
     """Plot a treemap of runner labels -> runner names, colored by current status.
 
     One row per (label, runner) pair, so a runner with several labels shows

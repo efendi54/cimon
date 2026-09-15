@@ -22,8 +22,16 @@ cache and builds tooling on top of it:
   failed in the last week" or "which runners are currently busy".
 - **Visualizing** -- turn filtered cache data into charts (job durations,
   merge-group failures, ...) through a small, pluggable rendering pipeline.
-- **Call graphs** -- render a workflow's job/reusable-workflow structure as a
-  Mermaid diagram, to understand how its jobs and called workflows relate.
+
+At a glance, the three features form one pipeline -- each stage reads the
+Parquet file the previous one wrote:
+
+```mermaid
+flowchart LR
+    A["GitHub Actions<br>REST API"] -->|"sync"| B[("workflows.parquet<br>local cache")]
+    B -->|"query"| C[("filtered<br>Parquet")]
+    C -->|"visualize"| D["charts<br>*.html"]
+```
 
 ### Caching
 
@@ -158,6 +166,17 @@ without requiring opt-in. Pass an absolute `--quota-limit` to override this.
 
 This is checked twice:
 
+```mermaid
+flowchart TD
+    S["cimon sync"] --> P{"Preflight check<br>(free /rate_limit call)"}
+    P -- "already at/below limit" --> X["abort immediately,<br>no work done"]
+    P -- "above limit" --> F["fetch runs + jobs"]
+    F --> Q{"quota <= --quota-limit<br>on any response?"}
+    Q -- "yes" --> SAVE["save everything fetched<br>so far"] --> AB["abort sync"]
+    Q -- "no, more to do" --> F
+    F -- "nothing left to fetch" --> DONE["Cache update completed"]
+```
+
 - **Before** any work starts (a free `/rate_limit` check that doesn't itself
   consume quota), so a sync that's already doomed fails fast instead of
   fetching workflow runs first.
@@ -174,6 +193,14 @@ Once `workflows.parquet` is populated, filter it down to answer questions
 like "which jobs failed in the last week" or "which runners are currently
 busy" -- without writing any pyarrow/DuckDB code. A filter can be expressed
 three ways, all compiling to the same `pyarrow.dataset` expressions:
+
+```mermaid
+flowchart LR
+    A["Python builder<br>(WorkflowQuery)"] --> D["pyarrow.dataset<br>expression"]
+    B["YAML / JSON<br>spec file"] --> D
+    C["cimon query<br>CLI command"] --> D
+    D --> E[("filtered rows")]
+```
 
 - a fluent Python builder (`WorkflowQuery`), for ad-hoc use in scripts/notebooks;
 - a declarative YAML/JSON **spec file**, for anything that needs to be
@@ -278,6 +305,13 @@ Currently registered:
 A visualization is three small pieces: a filter spec, a render function, and
 one line registering them together. As an example, here's a simplified
 version of how `job-durations` is built.
+
+```mermaid
+flowchart LR
+    A["1. filter spec<br>(YAML)"] --> C["register()"]
+    B["2. render(table,<br>output_dir)"] --> C
+    C --> D["cimon visualize &lt;name&gt;"]
+```
 
 **1. Write a filter spec** -- a YAML file describing which rows to keep (see
 [Querying the workflows cache](docs/references/workflow-query.md) for the

@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 import click
+import requests
 import yaml
 
-import requests
 from cimon.github_api import (
     RUNNER_STATUS_PARQUET_FILE_NAME,
     RUNNER_STATUS_SNAPSHOTS_DIR_NAME,
@@ -19,7 +19,6 @@ from cimon.github_api import (
     print_quota,
     print_runner_status,
     render_runner_status_chart,
-    render_runner_status_trend,
 )
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
@@ -107,8 +106,12 @@ def quota(token: str | None, host: str | None) -> None:
     help="GitHub API host, e.g. git.hub.vwgroup.com. Defaults to GH_HOST.",
 )
 @click.option("--org", help="Organization to list self-hosted runners for, e.g. CAS.")
-@click.option("--owner", help="Repository owner, used with --repo if --org is not given.")
-@click.option("--repo", help="Repository name, used with --owner if --org is not given.")
+@click.option(
+    "--owner", help="Repository owner, used with --repo if --org is not given."
+)
+@click.option(
+    "--repo", help="Repository name, used with --owner if --org is not given."
+)
 @click.option(
     "-o",
     "--output",
@@ -150,7 +153,9 @@ def runners(
 
     try:
         session = create_session(token)
-        runner_list = list_runners(session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo)
+        runner_list = list_runners(
+            session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo
+        )
         print_runner_status(runner_list)
 
         snapshot_file = append_runner_snapshot(
@@ -166,32 +171,6 @@ def runners(
     except requests.RequestException:
         logger.exception("Failed to fetch runner status")
         raise click.Abort from None
-
-
-@main.command("runner-status-trend")
-@click.option(
-    "--cache-dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=Path.home() / ".cache/cimon",
-    help="Directory containing runner_status.parquet, as recorded by repeated 'cimon runners' calls.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-    help="Write the per-runner status/busy trend chart (HTML) to this file. Requires the 'viz' extra.",
-)
-def runner_status_trend(cache_dir: Path, output_path: Path) -> None:
-    """Plot each runner's recorded status/busy history over time, one row per runner."""
-    cache_path = cache_dir / RUNNER_STATUS_PARQUET_FILE_NAME
-    if not cache_path.exists():
-        msg = f"No runner-status snapshots found at {cache_path}. Run 'cimon runners' a few times first."
-        raise click.UsageError(msg)
-
-    render_runner_status_trend(cache_path, output_path)
-    logger.info(f"Wrote {output_path}")
 
 
 @main.command("build-metrics")
@@ -330,7 +309,13 @@ def query(
     is_flag=True,
     help="List the registered visualization names and exit.",
 )
-def visualize(names: tuple[str, ...], input_path: Path | None, output_dir: Path, *, list_only: bool) -> None:
+def visualize(
+    names: tuple[str, ...],
+    input_path: Path | None,
+    output_dir: Path,
+    *,
+    list_only: bool,
+) -> None:
     """Filter the workflows Parquet cache per one or more registered visualizations' specs, then render them.
 
     NAMES can be given more than once (e.g. `cimon visualize job-durations

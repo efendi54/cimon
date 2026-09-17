@@ -28,22 +28,8 @@ for var in "${required_vars[@]}"; do
   fi
 done
 
-# get list of workflow files being triggered in pull_request or merge_group events
-mapfile -t wf_files < <(grep -RE "(merge_group|pull_request):" ${WORKSPACE_FOLDER}/.github/workflows/ | cut -d: -f1 |  xargs -n1 basename | sort -u)
-
-export FROM_DATE="$(date -I)"
-export TO_DATE="$(date -I)"
-if [ $# -ge 1 ]; then
-  export FROM_DATE="$1"
-fi
-if [ $# -ge 2 ]; then
-  export TO_DATE="$2"
-fi
-
-for wf in "${wf_files[@]}"; do
-  uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"  
-done
-# uv run cimon sync --workflow pr.yml --from-date "$(date -I)"
-# uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"
+uv run --extra viz cimon visualize job-durations merge-group-failures -i "${CIMON_CACHE_DIR}/workflows.parquet" -o "${CIMON_VIZ_OUTPUT_DIR}"
+uv run cimon runners --org CAS -o "${CIMON_VIZ_OUTPUT_DIR}"/runner-status.html
+uv run --extra viz cimon runner-status-trend -o "${CIMON_VIZ_OUTPUT_DIR}/runner-status-trend.html"
   
 popd >/dev/null

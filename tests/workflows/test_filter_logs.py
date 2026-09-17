@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
 from cimon.workflows import filter_logs
 
 if TYPE_CHECKING:
@@ -29,7 +30,11 @@ def _write_sample(path: Path) -> None:
 
 
 def _fake_download_job_log(
-    _host: str, _owner: str, _repo: str, job_id: str, output_dir: Path
+    _host: str,
+    _owner: str,
+    _repo: str,
+    job_id: str,
+    output_dir: Path,
 ) -> Path:
     logfile = output_dir / f"{job_id}.log"
     contents = {
@@ -42,7 +47,8 @@ def _fake_download_job_log(
 
 
 def test_run_writes_matching_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only rows whose log matches the pattern are written to log-match.parquet."""
     monkeypatch.setattr(filter_logs, "ensure_github_auth", lambda _host: None)
@@ -107,7 +113,11 @@ def test_download_log_skips_already_downloaded_log(
     calls: list[str] = []
 
     def _tracking_download(
-        _host: str, _owner: str, _repo: str, job_id: str, output_dir: Path
+        _host: str,
+        _owner: str,
+        _repo: str,
+        job_id: str,
+        output_dir: Path,
     ) -> Path:
         calls.append(job_id)
         return _fake_download_job_log(_host, _owner, _repo, job_id, output_dir)
@@ -127,13 +137,18 @@ def test_download_log_skips_already_downloaded_log(
 
 
 def test_run_removes_logs_dir_by_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Without --keep-logs, the downloaded logs don't survive the run."""
     seen_logs_dirs: list[Path] = []
 
     def _tracking_download(
-        _host: str, _owner: str, _repo: str, job_id: str, output_dir: Path
+        _host: str,
+        _owner: str,
+        _repo: str,
+        job_id: str,
+        output_dir: Path,
     ) -> Path:
         seen_logs_dirs.append(output_dir)
         return _fake_download_job_log(_host, _owner, _repo, job_id, output_dir)
@@ -158,7 +173,11 @@ def test_run_keeps_logs_and_skips_redownload_across_runs(
     calls: list[str] = []
 
     def _tracking_download(
-        _host: str, _owner: str, _repo: str, job_id: str, output_dir: Path
+        _host: str,
+        _owner: str,
+        _repo: str,
+        job_id: str,
+        output_dir: Path,
     ) -> Path:
         calls.append(job_id)
         return _fake_download_job_log(_host, _owner, _repo, job_id, output_dir)
@@ -184,3 +203,64 @@ def test_run_keeps_logs_and_skips_redownload_across_runs(
     filter_logs.run(input_path, "ERROR:", output_dir, keep_logs=True)
 
     assert calls == []
+
+
+def test_download_log_skips_job_on_download_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed download (e.g. a 404 for an expired log) is skipped instead of aborting the run."""
+    import subprocess  # noqa: PLC0415
+
+    def _failing_download(
+        _host: str,
+        _owner: str,
+        _repo: str,
+        job_id: str,
+        output_dir: Path,
+    ) -> Path:
+        # download_job_log() leaves this behind before the subprocess call fails.
+        (output_dir / f"{job_id}.log").touch()
+        raise subprocess.CalledProcessError(1, ["gh"])
+
+    monkeypatch.setattr(filter_logs, "ensure_github_auth", lambda _host: None)
+    monkeypatch.setattr(filter_logs, "download_job_log", _failing_download)
+
+    job_url = "https://github.com/acme/app/actions/runs/100/job/1"
+    with caplog.at_level("WARNING"):
+        result = filter_logs._download_log(job_url, tmp_path, "[1/1] (100%)")  # noqa: SLF001
+
+    assert result is None
+    assert "failed to download its log" in caplog.text
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_run_continues_after_a_job_log_fails_to_download(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One job's log failing to download doesn't abort the rest of the run."""
+    import subprocess  # noqa: PLC0415
+
+    def _flaky_download(
+        _host: str,
+        _owner: str,
+        _repo: str,
+        job_id: str,
+        output_dir: Path,
+    ) -> Path:
+        if job_id == "2":
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return _fake_download_job_log(_host, _owner, _repo, job_id, output_dir)
+
+    monkeypatch.setattr(filter_logs, "ensure_github_auth", lambda _host: None)
+    monkeypatch.setattr(filter_logs, "download_job_log", _flaky_download)
+
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    output_path = filter_logs.run(input_path, "ERROR:", tmp_path / "out")
+
+    table = pq.read_table(output_path)
+    assert table.column("job_name").to_pylist() == ["build"]

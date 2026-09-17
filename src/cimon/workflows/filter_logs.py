@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -68,12 +69,14 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
     output. Skips the download (and thus the GitHub API quota it would
     consume) if that log was already downloaded, e.g. because `job_url`
     appears more than once in the input. Returns `None` (logging a warning)
-    if `job_url` doesn't look like a workflow-job URL.
+    if `job_url` doesn't look like a workflow-job URL, or if the log could
+    not be downloaded (e.g. a 404 because its retention period expired) --
+    either way, that one job is skipped instead of aborting the whole run.
     """
     match = WORKFLOW_URL_RE.match(job_url)
     if not match:
         logger.warning(
-            f"{progress} Skipping job URL that doesn't match the expected format: {job_url}"
+            f"{progress} Skipping job URL that doesn't match the expected format: {job_url}",
         )
         return None
 
@@ -86,16 +89,30 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
     ensure_github_auth(info["host"])
 
     logger.info(f"{progress} Downloading {job_url}")
-    downloaded = download_job_log(
-        info["host"], info["owner"], info["repo"], info["job_id"], logs_dir
-    )
+    try:
+        downloaded = download_job_log(
+            info["host"],
+            info["owner"],
+            info["repo"],
+            info["job_id"],
+            logs_dir,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.warning(f"{progress} Skipping {job_url}: failed to download its log ({exc})")
+        # download_job_log() leaves an empty/partial file behind on failure.
+        (logs_dir / f"{info['job_id']}.log").unlink(missing_ok=True)
+        return None
     downloaded.rename(log_path)
     logger.info(f"{progress} Downloaded to {log_path}")
     return log_path
 
 
 def run(
-    input_path: Path, pattern: str, output_dir: Path, *, keep_logs: bool = False
+    input_path: Path,
+    pattern: str,
+    output_dir: Path,
+    *,
+    keep_logs: bool = False,
 ) -> Path | None:
     """Match every row's job log in `input_path` against `pattern`, writing matches to `output_dir`.
 
@@ -137,7 +154,7 @@ def run(
 
     if not matched_indices:
         logger.warning(
-            f"No log matched pattern {pattern!r} across {total} job(s); not writing an output file."
+            f"No log matched pattern {pattern!r} across {total} job(s); not writing an output file.",
         )
         return None
 

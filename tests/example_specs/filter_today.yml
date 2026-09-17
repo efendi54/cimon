@@ -3,4 +3,4 @@
 all:
   - column: created_at
     op: between
-    value: ["2026-09-16", "today_end"]
+    value: ["2026-09-16T13:22:37Z", "2026-09-16T20:22:37Z"]

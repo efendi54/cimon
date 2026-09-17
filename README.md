@@ -207,8 +207,8 @@ flowchart LR
   supplied dynamically (a CLI flag, a saved config, ...) -- and reused as-is
   by both the `query` CLI command and `cimon visualize` (see
   [Visualizations](#visualizations) below);
-- the `cimon query` CLI command, which applies a spec file to a Parquet cache
-  and writes the filtered rows to a new Parquet file.
+- the `cimon query` CLI command, which applies one or more spec files to a
+  Parquet cache and writes the filtered rows to a new Parquet file.
 
 #### Example: filtering with a spec file
 
@@ -227,7 +227,7 @@ all:
 ```
 
 ```bash
-uv run cimon query -i workflows.parquet -s tests/example_specs/filter_by_job_name.yml -o out/filtered.parquet
+uv run cimon query tests/example_specs/filter_by_job_name.yml -i workflows.parquet -o out/filtered.parquet
 ```
 
 ```bash

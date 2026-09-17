@@ -224,14 +224,21 @@ all:
 ## CLI usage
 
 ```bash
-cimon query \
+cimon query spec.yaml \
   --input workflows.parquet \
-  --spec spec.yaml \
   --output filtered.parquet \
   --column run_id --column job_name --column job_runner_labels
 ```
 
-Reads the spec file (YAML or JSON), filters `--input`, optionally restricts
-the output to the given `--column` values (repeatable), and atomically writes
-the result to `--output` as a new Parquet file -- ready to be picked up by a
+Reads one or more spec files (YAML or JSON, given as positional arguments;
+rows must match all of them), filters `--input`, optionally restricts the
+output to the given `--column` values (repeatable), and atomically writes the
+result to `--output` as a new Parquet file -- ready to be picked up by a
 visualization or statistics step (e.g. via `table.to_pandas()`).
+
+Given several spec files, all of them must match (AND-combined) for a row to
+be kept:
+
+```bash
+cimon query spec-a.yaml spec-b.yaml --input workflows.parquet --output filtered.parquet
+```

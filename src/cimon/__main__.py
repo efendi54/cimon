@@ -24,6 +24,7 @@ from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
 from cimon.workflows.build_metrics import process_input as run_build_metrics
+from cimon.workflows.filter_logs import run as run_filter_logs
 from cimon.workflows.query import WorkflowQuery
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,52 @@ def build_metrics(input_arg: str, output_dir: Path) -> None:
     run_build_metrics(input_arg, output_dir)
 
 
+@main.command("filter-logs")
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    help="Path to a Parquet file with a job_url column (e.g. from 'cimon query -c job_url').",
+)
+@click.option(
+    "-p",
+    "--pattern",
+    required=True,
+    help="Regular expression to search for in each job's downloaded log.",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    "output_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("./out/filter-logs"),
+    help="Directory to write log-match.parquet into, if any job's log matched.",
+)
+@click.option(
+    "--keep-logs",
+    is_flag=True,
+    help="Keep downloaded logs under OUTPUT_DIR/logs instead of a temporary directory, "
+    "so a later call over the same/overlapping input can skip logs it already downloaded.",
+)
+def filter_logs(
+    input_path: Path, pattern: str, output_dir: Path, *, keep_logs: bool
+) -> None:
+    """Download each row's job_url log from INPUT and keep rows whose log matches PATTERN.
+
+    Downloads every job's log into a directory (temporary by default, or
+    OUTPUT_DIR/logs if --keep-logs is given), searches it for PATTERN (a
+    regular expression), and writes every row whose log matched to
+    log-match.parquet in OUTPUT_DIR. If no log matched, no output file is
+    written and a warning is logged instead.
+    """
+    try:
+        run_filter_logs(input_path, pattern, output_dir, keep_logs=keep_logs)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from None
+
+
 @main.command(
     "sync",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
@@ -236,6 +283,13 @@ def repair_cache(cache_dir: Path) -> None:
 
 
 @main.command("query")
+@click.argument(
+    "spec_paths",
+    metavar="SPECS...",
+    nargs=-1,
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+)
 @click.option(
     "-i",
     "--input",
@@ -243,14 +297,6 @@ def repair_cache(cache_dir: Path) -> None:
     required=True,
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
     help="Path to the workflows Parquet cache to filter.",
-)
-@click.option(
-    "-s",
-    "--spec",
-    "spec_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
-    help="YAML or JSON file describing the filter (see cimon.workflows.query_spec).",
 )
 @click.option(
     "-o",
@@ -268,14 +314,21 @@ def repair_cache(cache_dir: Path) -> None:
     help="Restrict the output to this column. Can be given multiple times.",
 )
 def query(
+    spec_paths: tuple[Path, ...],
     input_path: Path,
-    spec_path: Path,
     output_path: Path,
     output_columns: tuple[str, ...],
 ) -> None:
-    """Filter the workflows Parquet cache with a declarative spec file into a new Parquet file."""
-    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-    workflow_query = WorkflowQuery(input_path).filter_spec(spec)
+    """Filter the workflows Parquet cache with one or more declarative spec files into a new Parquet file.
+
+    SPECS is one or more YAML/JSON files describing a filter (see
+    cimon.workflows.query_spec). Given several, all of them must match
+    (AND-combined) for a row to be kept.
+    """
+    workflow_query = WorkflowQuery(input_path)
+    for spec_path in spec_paths:
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+        workflow_query = workflow_query.filter_spec(spec)
     if output_columns:
         workflow_query = workflow_query.columns(*output_columns)
 

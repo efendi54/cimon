@@ -4,7 +4,7 @@ Small CLI tool for tracking github action workflow runs related data.
 
 > **Note:**
 >   It is usefull to have the following Visual Studio Code Extensions be installed:
->   - PK Parquet Viewer (for inspecting e.g. parquet files)
+>   - DuckDB Sidekick (for inspecting e.g. parquet files)
 >   - Call Graph Explorer (to visualize function callings and function dependencies)
 
 ## Purpose

@@ -28,6 +28,15 @@ class JobEntry(BaseModel):
     job: JobInfo
 
 
+class RunAttemptInfo(BaseModel):
+    """Workflow-run metadata that can differ between rerun attempts."""
+
+    run_attempt: int
+    workflow_run_url: str
+    workflow_status: str
+    workflow_conclusion: str | None = None
+
+
 class RunEntry(BaseModel):
     """A single workflow run, including its cached jobs."""
 
@@ -44,6 +53,7 @@ class RunEntry(BaseModel):
     created_at: str
     cache_updated_at: str
     jobs: list[JobEntry] = Field(default_factory=list)
+    attempts: list[RunAttemptInfo] = Field(default_factory=list)
 
 
 class WorkflowInfo(BaseModel):

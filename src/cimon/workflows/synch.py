@@ -39,6 +39,7 @@ from cimon.github_api import (
 from cimon.workflows.models import (
     JobEntry,
     JobInfo,
+    RunAttemptInfo,
     RunEntry,
     WorkflowCache,
     WorkflowInfo,
@@ -283,6 +284,32 @@ def fetch_run(
     ).json()
 
 
+def fetch_run_attempt_info(
+    session: requests.Session,
+    base_url: str,
+    owner: str,
+    repo: str,
+    host: str,
+    run_id: int | str,
+    run_attempt: int,
+    etag_cache: MutableMapping[str, dict[str, Any]] | None = None,
+) -> RunAttemptInfo:
+    """Fetch workflow metadata for one historical run attempt."""
+    attempt = api_get(
+        session,
+        f"{base_url}/repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}",
+        etag_cache=etag_cache,
+    ).json()
+    return RunAttemptInfo(
+        run_attempt=run_attempt,
+        workflow_run_url=(
+            f"https://{host}/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}"
+        ),
+        workflow_status=attempt["status"],
+        workflow_conclusion=attempt["conclusion"],
+    )
+
+
 def find_stale_active_run_ids(
     parquet_rows: list[dict[str, Any]],
     known_run_ids: set[str],
@@ -464,6 +491,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
     rows = []
 
     for run in data.runs:
+        attempts_by_number = {attempt.run_attempt: attempt for attempt in run.attempts}
         run_fields = {
             "owner": workflow.owner if workflow else None,
             "repo": workflow.repo if workflow else None,
@@ -507,9 +535,20 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
 
         for job_entry in run.jobs:
             job = job_entry.job
+            attempt = attempts_by_number.get(job.run_attempt)
             rows.append(
                 {
                     **run_fields,
+                    **(
+                        {
+                            "run_attempt": attempt.run_attempt,
+                            "workflow_run_url": attempt.workflow_run_url,
+                            "workflow_status": attempt.workflow_status,
+                            "workflow_conclusion": attempt.workflow_conclusion,
+                        }
+                        if attempt
+                        else {}
+                    ),
                     "job_id": str(job.id),
                     "job_name": job.name,
                     "job_url": job.html_url,
@@ -694,6 +733,33 @@ def cached_jobs_from_parquet(
     return existing_run_ids, jobs_by_run
 
 
+def cached_attempts_from_parquet(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[RunAttemptInfo]]:
+    """Reconstruct distinct per-attempt workflow metadata from Parquet rows."""
+    attempts_by_run: dict[str, dict[int, RunAttemptInfo]] = {}
+
+    for row in rows:
+        run_id = row.get("run_id")
+        run_attempt = row.get("run_attempt")
+        workflow_run_url = row.get("workflow_run_url")
+        workflow_status = row.get("workflow_status")
+        if not run_id or run_attempt is None or not workflow_run_url or not workflow_status:
+            continue
+
+        attempts_by_run.setdefault(str(run_id), {})[run_attempt] = RunAttemptInfo(
+            run_attempt=run_attempt,
+            workflow_run_url=workflow_run_url,
+            workflow_status=workflow_status,
+            workflow_conclusion=row.get("workflow_conclusion"),
+        )
+
+    return {
+        run_id: list(attempts.values())
+        for run_id, attempts in attempts_by_run.items()
+    }
+
+
 def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
     """Replace runs in the persistent Parquet cache with the JSON snapshot."""
     current_rows = cache_to_parquet_rows(request_data)
@@ -818,7 +884,7 @@ def create_run_cache_entry(
 ) -> RunEntry:
     """Create a cache entry for a workflow run."""
     pr_number, pr_url = _extract_pull_request_info(run, owner, repo, host)
-    return RunEntry(
+    entry = RunEntry(
         run_id=run["id"],
         run_number=run["run_number"],
         run_attempt=run.get("run_attempt"),
@@ -832,6 +898,16 @@ def create_run_cache_entry(
         created_at=run["created_at"],
         cache_updated_at=now_iso(),
     )
+    if entry.run_attempt is not None:
+        entry.attempts.append(
+            RunAttemptInfo(
+                run_attempt=entry.run_attempt,
+                workflow_run_url=entry.workflow_run_url,
+                workflow_status=entry.workflow_status,
+                workflow_conclusion=entry.workflow_conclusion,
+            ),
+        )
+    return entry
 
 
 def create_job_cache_entry(job: dict[str, Any]) -> JobEntry:
@@ -1133,8 +1209,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     existing_parquet_rows = load_parquet(str(parquet_file))
     existing_run_ids, cached_jobs_by_run = cached_jobs_from_parquet(
-        existing_parquet_rows
+        existing_parquet_rows,
     )
+    cached_attempts_by_run = cached_attempts_from_parquet(existing_parquet_rows)
 
     # The JSON file is deliberately a snapshot of this request only.
     cache = WorkflowCache(
@@ -1318,6 +1395,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     for run in runs:
         run_id = str(run["id"])
         cached = create_run_cache_entry(run, args.owner, args.repo, host)
+        current_attempt = cached.run_attempt
+        cached.attempts.extend(
+            attempt
+            for attempt in cached_attempts_by_run.get(run_id, [])
+            if attempt.run_attempt != current_attempt
+        )
         cached_runs[run_id] = cached
 
         if run_id not in existing_run_ids:
@@ -1412,6 +1495,36 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
                 cached.cache_updated_at = now_iso()
 
                 logger.debug(f"Updated {len(jobs)} jobs for workflow run {run_id}")
+
+    # ------------------------------------------------------------------
+    # Fetch metadata for historical rerun attempts
+    # ------------------------------------------------------------------
+
+    if quota_exceeded is None:
+        try:
+            for run_id, cached in cached_runs.items():
+                known_attempts = {attempt.run_attempt for attempt in cached.attempts}
+                job_attempts = {
+                    entry.job.run_attempt
+                    for entry in cached.jobs
+                    if entry.job.run_attempt is not None
+                }
+
+                for run_attempt in sorted(job_attempts - known_attempts):
+                    cached.attempts.append(
+                        fetch_run_attempt_info(
+                            session,
+                            base_url,
+                            args.owner,
+                            args.repo,
+                            host,
+                            run_id,
+                            run_attempt,
+                            etag_cache=etag_cache_view,
+                        ),
+                    )
+        except QuotaLimitReachedError as exc:
+            quota_exceeded = exc
 
     # ------------------------------------------------------------------
     # Save complete cache

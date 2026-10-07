@@ -1,8 +1,8 @@
 # ruff: noqa: CPY001
 """Render failing merge_group jobs, one HTML page per workflow, via DuckDB + Plotly.
 
-Requires the `viz` extra (`duckdb`, `pandas`, `plotly`) -- imported lazily by
-the registry so the rest of `cimon` keeps working without it installed.
+Requires the `viz` extra (`duckdb`) -- imported lazily by the registry so the
+rest of `cimon` keeps working without it installed.
 """
 
 from __future__ import annotations
@@ -70,7 +70,9 @@ def render(table: pa.Table, output_dir: Path) -> None:
         logger.info(f"Wrote {output_path}")
 
 
-def _render_workflow_page(group: pd.DataFrame, workflow_name: str, output_path: Path) -> None:
+def _render_workflow_page(
+    group: pd.DataFrame, workflow_name: str, output_path: Path
+) -> None:
     """Render one workflow's failure-count bar chart + failure-timeline scatter."""
     # Most-failing job first, both to rank it and to keep both subplots' job
     # order (and thus their shared color mapping) aligned.
@@ -105,7 +107,11 @@ def _render_workflow_page(group: pd.DataFrame, workflow_name: str, output_path: 
                 y=sub["job_name"],
                 mode="markers",
                 name=job_name,
-                marker={"size": 9, "color": colors[job_name], "line": {"width": 1, "color": "black"}},
+                marker={
+                    "size": 9,
+                    "color": colors[job_name],
+                    "line": {"width": 1, "color": "black"},
+                },
                 customdata=sub["job_url"],
                 hovertemplate="%{x}<br>%{customdata}<extra>%{fullData.name}</extra>",
             ),

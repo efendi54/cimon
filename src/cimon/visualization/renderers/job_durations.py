@@ -1,8 +1,8 @@
 # ruff: noqa: CPY001
 """Render job duration over time, one HTML page per workflow, via DuckDB + Plotly.
 
-Requires the `viz` extra (`duckdb`, `pandas`, `plotly`) -- imported lazily by
-the registry so the rest of `cimon` keeps working without it installed.
+Requires the `viz` extra (`duckdb`) -- imported lazily by the registry so the
+rest of `cimon` keeps working without it installed.
 """
 
 from __future__ import annotations
@@ -64,7 +64,11 @@ def _add_duration_traces(
                 name=job_name,
                 legendgroup=job_name,
                 showlegend=job_name not in legend_shown,
-                marker={"size": 9, "color": colors[job_name], "line": {"width": 1, "color": "black"}},
+                marker={
+                    "size": 9,
+                    "color": colors[job_name],
+                    "line": {"width": 1, "color": "black"},
+                },
                 customdata=sub["job_url"],
                 hovertemplate="%{y:.1f} min<br>%{customdata}<extra>%{fullData.name}</extra>",
             ),
@@ -85,7 +89,9 @@ def render(table: pa.Table, output_dir: Path) -> None:
 
     if frame.empty:
         output_path = pages_dir / "none.html"
-        px.scatter(title="No completed, successful or in-progress jobs in range").write_html(output_path)
+        px.scatter(
+            title="No completed, successful or in-progress jobs in range"
+        ).write_html(output_path)
         logger.info(f"Wrote {output_path}")
         return
 
@@ -98,7 +104,9 @@ def render(table: pa.Table, output_dir: Path) -> None:
         completed = group[group["job_status"] == "completed"]
 
         # Same color per job across both subplots; legend entry shown only once.
-        colors = dict(zip(sorted(group["job_name"].unique()), cycle(px.colors.qualitative.Dark24)))
+        colors = dict(
+            zip(sorted(group["job_name"].unique()), cycle(px.colors.qualitative.Dark24))
+        )
         legend_shown: set[str] = set()
 
         figure = make_subplots(
@@ -110,7 +118,9 @@ def render(table: pa.Table, output_dir: Path) -> None:
         _add_duration_traces(figure, completed, 2, colors, legend_shown)
 
         # Higher contrast against the plot background.
-        figure.update_layout(title=f"Job duration -- {workflow_name}", plot_bgcolor="#e5e5e5")
+        figure.update_layout(
+            title=f"Job duration -- {workflow_name}", plot_bgcolor="#e5e5e5"
+        )
         figure.update_xaxes(title_text="time")
         figure.update_yaxes(title_text="active duration (min)", col=1)
         figure.write_html(output_path, post_script=_CLICK_TO_OPEN_JOB_URL)

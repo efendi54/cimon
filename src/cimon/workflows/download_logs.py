@@ -1,13 +1,11 @@
 # ruff: noqa: CPY001
-"""Download job logs and filter rows/URLs by a log pattern.
+"""Download job logs, optionally keeping only those whose log matches a pattern.
 
-Accepts the same input forms as `cimon download-logs`: a single workflow-job
-URL, a JSON array of URL strings, or a Parquet file with a `job_url` column
-(e.g. produced by `cimon query -c job_url`) -- see `resolve_job_urls`. Each
-job's log is downloaded via the shared `download_job_log_for_url` routine
-into `<run_id>/<job_id>.log`, the same layout used by `cimon download-logs`
-and `cimon build-metrics`, then searched for a caller-supplied regular
-expression.
+Accepts a single workflow-job URL, a JSON array of URL strings, or a Parquet
+file with a `job_url` column (e.g. produced by `cimon query -c job_url`) --
+see `resolve_job_urls`. Each job's log is downloaded via the shared
+`download_job_log_for_url` routine into `<run_id>/<job_id>.log`, the same
+layout used by `cimon build-metrics`.
 
 By default that directory is a temporary one, removed again once this run
 finishes. Pass `keep_logs=True` to instead keep it under `output_dir/logs`,
@@ -15,10 +13,11 @@ persisted across runs -- so a later run over the same (or an overlapping)
 input can skip logs it already downloaded, without consuming GitHub API
 quota again.
 
-Every matched job is written to `log-match.parquet` in the output directory.
-Parquet input keeps all of its original columns; URL/JSON input only
-produces a `job_url` column. If no log matched at all, no output file is
-written and a warning is logged instead.
+If a `pattern` (regular expression) is given, every matched job is written
+to `log-match.parquet` in the output directory (Parquet input keeps all of
+its original columns; URL/JSON input only produces a `job_url` column); if
+nothing matched, a warning is logged and no output file is written. Without
+a `pattern`, logs are simply downloaded and no output file is produced.
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ def _logs_directory(output_dir: Path, *, keep_logs: bool) -> Iterator[Path]:
         yield logs_dir
         return
 
-    with tempfile.TemporaryDirectory(prefix="cimon-filter-logs-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="cimon-download-logs-") as tmp_dir:
         yield Path(tmp_dir)
 
 
@@ -91,31 +90,33 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
 
 def run(
     input_arg: str,
-    pattern: str,
     output_dir: Path,
+    pattern: str | None = None,
     *,
     keep_logs: bool = False,
 ) -> Path | None:
-    """Match every job's log resolved from `input_arg` against `pattern`, writing matches to `output_dir`.
+    """Download every job's log resolved from `input_arg`, optionally filtering by `pattern`.
 
     `input_arg` is a job URL, a JSON array of URL strings, or a Parquet file
-    with a `job_url` column -- the same input forms accepted by
-    `cimon download-logs` (see `resolve_job_urls`). Parquet input keeps all
-    of its original columns in the output; the other two forms only produce
-    a `job_url` column.
+    with a `job_url` column (see `resolve_job_urls`). Parquet input keeps all
+    of its original columns in `log-match.parquet`; the other two forms only
+    produce a `job_url` column.
 
     If `keep_logs` is set, downloaded logs are kept under `output_dir/logs`
     instead of a temporary directory, so a later call can skip logs it
     already downloaded (see `_logs_directory`).
 
-    Returns the path of `log-match.parquet` if at least one log matched,
-    `None` otherwise.
+    If `pattern` is given, returns the path of `log-match.parquet` once at
+    least one log matched it, `None` if none did. Without `pattern`, always
+    returns `None` -- every job's log is downloaded and nothing is written.
     """
-    try:
-        regex = re.compile(pattern)
-    except re.error as exc:
-        msg = f"Invalid pattern {pattern!r}: {exc}"
-        raise ValueError(msg) from None
+    regex = None
+    if pattern is not None:
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            msg = f"Invalid pattern {pattern!r}: {exc}"
+            raise ValueError(msg) from None
 
     input_path = Path(input_arg)
 
@@ -139,12 +140,15 @@ def run(
 
             progress = f"[{index}/{total}] ({index / total:.0%})"
             log_path = _download_log(job_url, logs_dir, progress)
-            if log_path is None:
+            if log_path is None or regex is None:
                 continue
 
             content = log_path.read_text(encoding="utf-8", errors="replace")
             if regex.search(content):
                 matched_indices.append(index - 1)
+
+    if regex is None:
+        return None
 
     if not matched_indices:
         logger.warning(

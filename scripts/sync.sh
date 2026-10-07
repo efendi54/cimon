@@ -24,6 +24,8 @@ for var in "${required_vars[@]}"; do
     echo "$var environment variable is not set" >&2
     read -n 1 -s -r -p "Press any key to exit..."
     echo
+    read -n 1 -s -r -p "Press any key to continue..."
+    echo
     exit 1
   fi
 done

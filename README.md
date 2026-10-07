@@ -260,6 +260,155 @@ full row layout, the complete list of supported operators (`eq`, `between`,
 
 ## Features
 
+### Build metrics
+
+`cimon build-metrics` extracts Bazel build duration and cache-hit information
+from GitHub Actions job logs. It accepts one of three input forms:
+
+- a single GitHub Actions job URL;
+- a JSON array containing `{"job": {"job_url": ...}}` entries;
+- a Parquet file with a `job_url` column, typically produced by `cimon query`.
+
+These three input forms (URL / JSON array / Parquet file) are also accepted
+by `cimon download-logs` (see [Download logs](#download-logs) below); both
+commands download each job's log the same way, so a log already downloaded
+by one command is reused by the other. Their JSON form differs though:
+`download-logs` only needs job URLs, so it takes a plain array of URL
+strings instead of `build-metrics`' `{"job": {...}}` entries.
+
+For Parquet input, an optional `job_runner_name` column is carried into the
+runner comparison chart. The command uses `gh api`, so GitHub CLI must be
+authenticated for the URL's host (`GH_TOKEN` and `GH_HOST` can be used).
+
+```mermaid
+flowchart LR
+    A["job URL(s)<br>URL / JSON / Parquet"] --> B["download or reuse<br>job logs"]
+    B --> C["find bazel build commands<br>and final INFO cache stats"]
+    C --> D["per-job<br>JSON + Markdown"]
+    C --> E["multi-job<br>HTML trends"]
+```
+
+For each `bazel build` invocation, Cimon records its targets, Bazel configs,
+duration, and the raw Bazel process-strategy counts (`action cache hit`,
+`remote cache hit`, `internal`, `processwrapper-sandbox`, `local`). From those
+counts it derives three ratios (see [Cache-hit metrics](#cache-hit-metrics)
+below) instead of a single "cache-hit rate", because a combined local+remote
+rate cannot tell a specific runner's own cache health apart from the shared
+remote cache.
+
+#### Cache-hit metrics
+
+Bazel reports each build's processes under one of five strategies: `action
+cache hit` (this runner's own on-disk/incremental cache), `remote cache hit`
+(the shared remote cache), `internal` (bookkeeping, e.g. symlinks -- never a
+cache candidate), and `processwrapper-sandbox`/`local` (both: a real
+execution on this runner). Cimon derives three ratios from these counts:
+
+| Metric | Formula | What it tells you |
+|---|---|---|
+| `hit_rate` | `(action + remote) / (action + remote + internal + local + sandbox)` | Overall build-level cache effectiveness. **Not** a runner signal: `remote` is shared and `internal` dilutes it. |
+| `local_cache_effectiveness` | `action / (action + local + sandbox)` | Of the processes *not* covered by the shared remote cache, the share this runner's own cache already had. This is the actual runner-quality signal. |
+| `executed_share` | `(local + sandbox) / (action + remote + local + sandbox)` | Share of non-remote, non-internal processes this runner had to genuinely execute -- the direct cost of a cold local cache, and the strongest predictor of a slow build. |
+
+`local_cache_effectiveness` and `executed_share` are `None` (shown as `n/a` in
+the per-build Markdown table) when there was nothing to measure, e.g. a build
+entirely resolved by the remote cache.
+
+#### Example: one job
+
+```bash
+uv run cimon build-metrics \
+  https://cariad.ghe.com/CAS/app-adas-src/actions/runs/281903722/job/1159770792 \
+  out/build-metrics
+```
+
+#### Example: jobs selected from the workflow cache
+
+First create a Parquet file containing the build jobs of interest, including
+`job_url` and optionally `job_runner_name`. Then process all selected jobs:
+
+```bash
+uv run cimon query tests/example_specs/filter_build_jobs.yml \
+  -i workflows.parquet \
+  -o build_jobs.parquet \
+  -c job_url \
+  -c job_runner_name
+
+uv run cimon build-metrics build_jobs.parquet out/build-metrics
+```
+
+The output is organized by workflow run and job ID:
+
+```text
+out/build-metrics/
+├── 281903722/
+│   ├── 1159770792.log
+│   ├── 1159770792.json
+│   └── 1159770792.md
+├── cache-hit-rate-trend.html
+├── runner-cache-health.html
+└── runner-cache-trend.html
+```
+
+- `<job_id>.log` is the downloaded GitHub Actions log.
+- `<job_id>.json` contains the structured job and build metrics.
+- `<job_id>.md` contains a readable per-build table with the source log lines.
+- `cache-hit-rate-trend.html` plots hit rate and duration over time, one line
+  per Bazel config (hover shows the targets built together in that
+  invocation).
+- `runner-cache-health.html` compares `local_cache_effectiveness`, `hit_rate`,
+  and `executed_share` distributions between runners (see
+  [Cache-hit metrics](#cache-hit-metrics)), plus a runner x time-bucket
+  heatmap of `local_cache_effectiveness` below the box plots -- one row per
+  runner, so it stays readable with many (often short-lived) runners, unlike
+  a line-per-runner time series.
+- `runner-cache-trend.html` shows the same three metrics over time, one color
+  per runner. Click runner names in the legend to isolate specific runners.
+  The top `local_cache_effectiveness` panel is the relevant view for
+  runner-specific cache warming and degradation.
+
+Use the same output directory on repeated calls to avoid downloading logs
+again. Existing non-empty logs are reused, while new downloads are first
+written to a temporary `.log.part` file and only moved into place after a
+successful download. JSON, Markdown, and aggregate HTML files are regenerated
+from the cached logs. If no output directory is given, it defaults to `/tmp`.
+
+### Download logs
+
+`cimon download-logs` downloads job log(s) into
+`OUTPUT_DIR/<run_id>/<job_id>.log`, accepting the same three input forms as
+`cimon build-metrics` (a job URL, a JSON array, or a Parquet file with a
+`job_url` column) and reusing the same download routine, including skipping
+already-downloaded, non-empty logs:
+
+```bash
+uv run cimon download-logs -i build_jobs.parquet -o out/logs
+```
+
+The JSON array form is simply a list of job-url strings:
+
+```json
+[
+  "https://cariad.ghe.com/CAS/app-adas-src/actions/runs/281903722/job/1159770792",
+  "https://cariad.ghe.com/CAS/app-adas-src/actions/runs/281903722/job/1159770793"
+]
+```
+
+Pass `-p/--pattern` (a regular expression) to additionally keep only the
+jobs whose downloaded log matches it, writing those to `log-match.parquet`
+in `OUTPUT_DIR` (keeping all original columns for Parquet input; URL/JSON
+input only produces a `job_url` column). Without `--pattern`, logs are
+simply downloaded and no output file is written:
+
+```bash
+uv run cimon download-logs -i build_jobs.parquet -p "ERROR:" -o out/logs
+```
+
+Downloaded logs go into a temporary directory removed again once the run
+finishes. Pass `--keep-logs` to instead keep them under `OUTPUT_DIR/logs`,
+persisted across runs, so a later call over the same (or an overlapping)
+input can skip logs it already downloaded without consuming GitHub API quota
+again.
 
 ### Visualizations
 
@@ -291,8 +440,9 @@ Multiple names can be given at once to run several visualizations in one call:
 uv run --extra viz cimon visualize job-durations merge-group-failures -i workflows.parquet -o out/visualizations
 ```
 
-Rendering needs the optional `viz` dependency group (`duckdb`, `pandas`,
-`plotly`) -- install it once with `uv sync --extra viz --group test`.
+DuckDB-backed renderers need the optional `viz` dependency group (`duckdb`) --
+install it once with `uv sync --extra viz --group test`. Pandas and Plotly are
+standard dependencies because they are also required by `cimon build-metrics`.
 
 Currently registered:
 
@@ -357,7 +507,7 @@ def render(table: pa.Table, output_dir: Path) -> None:
 **3. Register it** in
 [`cimon.visualization.registry`](src/cimon/visualization/registry.py) -- the
 import of the render function is deferred so `cimon` keeps working without
-the `viz` extra installed unless this specific visualization is actually run:
+the `viz` extra installed unless a DuckDB-backed visualization is actually run:
 
 ```python
 def _render_job_durations(table: pa.Table, output_dir: Path) -> None:

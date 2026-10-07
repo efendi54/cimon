@@ -24,7 +24,7 @@ from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
 from cimon.workflows import synch
 from cimon.workflows.build_metrics import process_input as run_build_metrics
-from cimon.workflows.filter_logs import run as run_filter_logs
+from cimon.workflows.download_logs import run as run_download_logs
 from cimon.workflows.query import WorkflowQuery
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def quota(token: str | None, host: str | None) -> None:
     "--output",
     "output_path",
     type=click.Path(dir_okay=False, path_type=Path),
-    help="Also write an HTML treemap of runner labels/names colored by status to this file. Requires the 'viz' extra.",
+    help="Also write an HTML treemap of runner labels/names colored by status to this file.",
 )
 @click.option(
     "--cache-dir",
@@ -189,34 +189,36 @@ def build_metrics(input_arg: str, output_dir: Path) -> None:
     INPUT is a workflow-job URL, a JSON file listing job runs, or a Parquet
     file with a job_url column (e.g. from 'cimon query -c job_url'). Given
     multiple jobs, also writes an aggregated cache-hit-rate-trend.html
-    (requires the 'viz' extra). See cimon.workflows.build_metrics for
+    and runner-cache-health.html. See cimon.workflows.build_metrics for
     details. OUTPUT_DIR defaults to /tmp.
     """
     run_build_metrics(input_arg, output_dir)
 
 
-@main.command("filter-logs")
+@main.command("download-logs")
 @click.option(
     "-i",
     "--input",
-    "input_path",
+    "input_arg",
     required=True,
-    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
-    help="Path to a Parquet file with a job_url column (e.g. from 'cimon query -c job_url').",
+    help="A workflow-job URL, a JSON file of URL strings, or a Parquet file with a job_url "
+    "column (e.g. from 'cimon query -c job_url').",
 )
 @click.option(
     "-p",
     "--pattern",
-    required=True,
-    help="Regular expression to search for in each job's downloaded log.",
+    help="Regular expression to search for in each job's downloaded log. If given, only jobs "
+    "whose log matches are written to log-match.parquet in OUTPUT_DIR. If omitted, logs are "
+    "simply downloaded and no output file is written.",
 )
 @click.option(
     "-o",
     "--output-dir",
     "output_dir",
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path("./out/filter-logs"),
-    help="Directory to write log-match.parquet into, if any job's log matched.",
+    default=Path("./out/download-logs"),
+    help="Directory to download logs into (and write log-match.parquet into, if --pattern "
+    "matched any job).",
 )
 @click.option(
     "--keep-logs",
@@ -224,19 +226,23 @@ def build_metrics(input_arg: str, output_dir: Path) -> None:
     help="Keep downloaded logs under OUTPUT_DIR/logs instead of a temporary directory, "
     "so a later call over the same/overlapping input can skip logs it already downloaded.",
 )
-def filter_logs(
-    input_path: Path, pattern: str, output_dir: Path, *, keep_logs: bool
+def download_logs(
+    input_arg: str, pattern: str | None, output_dir: Path, *, keep_logs: bool
 ) -> None:
-    """Download each row's job_url log from INPUT and keep rows whose log matches PATTERN.
+    """Download each job's log from INPUT, optionally keeping only the ones matching PATTERN.
 
-    Downloads every job's log into a directory (temporary by default, or
-    OUTPUT_DIR/logs if --keep-logs is given), searches it for PATTERN (a
-    regular expression), and writes every row whose log matched to
-    log-match.parquet in OUTPUT_DIR. If no log matched, no output file is
-    written and a warning is logged instead.
+    INPUT is a workflow-job URL, a JSON file listing job URLs, or a Parquet
+    file with a job_url column. Downloads every job's log into
+    OUTPUT_DIR/<run_id>/<job_id>.log (temporary by default, or
+    OUTPUT_DIR/logs if --keep-logs is given). If --pattern is given, each
+    log is also searched for it (a regular expression) and every matching
+    job is written to log-match.parquet in OUTPUT_DIR (keeping all original
+    columns for Parquet input); if nothing matched, no output file is
+    written and a warning is logged instead. Without --pattern, no output
+    file is produced -- logs are simply downloaded.
     """
     try:
-        run_filter_logs(input_path, pattern, output_dir, keep_logs=keep_logs)
+        run_download_logs(input_arg, output_dir, pattern, keep_logs=keep_logs)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
 

@@ -2,3 +2,6 @@ all:
   - column: job_conclusion
     op: eq
     value: failure
+  - column: job_conclusion
+    op: eq
+    value: failure

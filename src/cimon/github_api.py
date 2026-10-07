@@ -352,8 +352,6 @@ def render_runner_status_chart(
 
     One row per (label, runner) pair, so a runner with several labels shows
     up under each of them. This is a live snapshot (not a time series).
-    Requires the `viz` extra (`pandas`, `plotly`), imported lazily so the rest
-    of this module keeps working without it installed.
     """
     import pandas as pd  # noqa: PLC0415
     import plotly.express as px  # noqa: PLC0415

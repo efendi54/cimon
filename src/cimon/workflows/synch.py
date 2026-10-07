@@ -302,12 +302,23 @@ def fetch_run_attempt_info(
     ).json()
     return RunAttemptInfo(
         run_attempt=run_attempt,
-        workflow_run_url=(
-            f"https://{host}/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}"
+        workflow_run_url=workflow_run_attempt_url(
+            host, owner, repo, run_id, run_attempt
         ),
         workflow_status=attempt["status"],
         workflow_conclusion=attempt["conclusion"],
     )
+
+
+def workflow_run_attempt_url(
+    host: str,
+    owner: str,
+    repo: str,
+    run_id: int | str,
+    run_attempt: int,
+) -> str:
+    """Build the browser URL for a specific workflow-run attempt."""
+    return f"https://{host}/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}"
 
 
 def find_stale_active_run_ids(
@@ -683,23 +694,46 @@ def print_cache_info(cache_dir: Path) -> None:
     log_parquet_cache_overview(str(parquet_file))
 
 
-def cached_jobs_from_parquet(
+def cached_data_from_parquet(
     rows: list[dict[str, Any]],
-) -> tuple[set[str], dict[str, list[JobEntry]]]:
-    """Build a run index and reusable job snapshots from Parquet rows."""
+) -> tuple[
+    set[str],
+    dict[str, list[JobEntry]],
+    dict[str, list[RunAttemptInfo]],
+]:
+    """Build run, job, and attempt indexes in one pass over Parquet rows."""
     existing_run_ids = set()
     jobs_by_run: dict[str, list[JobEntry]] = {}
+    attempts_by_run: dict[str, dict[int, RunAttemptInfo]] = {}
 
     for row in rows:
         run_id = row.get("run_id")
         if not run_id:
             continue
 
-        existing_run_ids.add(str(run_id))
+        run_id = str(run_id)
+        existing_run_ids.add(run_id)
 
         # A run without cached jobs must still be recognized as "checked",
         # otherwise runs with genuinely zero jobs get refetched forever.
-        jobs_by_run.setdefault(str(run_id), [])
+        jobs_by_run.setdefault(run_id, [])
+
+        run_attempt = row.get("run_attempt")
+        workflow_run_url = row.get("workflow_run_url")
+        workflow_status = row.get("workflow_status")
+        run_attempts = attempts_by_run.setdefault(run_id, {})
+        if (
+            run_attempt is not None
+            and run_attempt not in run_attempts
+            and workflow_run_url
+            and workflow_status
+        ):
+            run_attempts[run_attempt] = RunAttemptInfo(
+                run_attempt=run_attempt,
+                workflow_run_url=workflow_run_url,
+                workflow_status=workflow_status,
+                workflow_conclusion=row.get("workflow_conclusion"),
+            )
 
         job_id = row.get("job_id")
         if job_id is None:
@@ -728,36 +762,33 @@ def cached_jobs_from_parquet(
             ),
         )
 
-        jobs_by_run[str(run_id)].append(job_entry)
+        jobs_by_run[run_id].append(job_entry)
 
-    return existing_run_ids, jobs_by_run
+    return (
+        existing_run_ids,
+        jobs_by_run,
+        {
+            run_id: list(attempts.values())
+            for run_id, attempts in attempts_by_run.items()
+        },
+    )
 
 
-def cached_attempts_from_parquet(
-    rows: list[dict[str, Any]],
-) -> dict[str, list[RunAttemptInfo]]:
-    """Reconstruct distinct per-attempt workflow metadata from Parquet rows."""
-    attempts_by_run: dict[str, dict[int, RunAttemptInfo]] = {}
+def cached_attempt_has_job_snapshot(
+    run_attempt: int | None,
+    attempts: list[RunAttemptInfo],
+    jobs: list[JobEntry] | None,
+) -> bool:
+    """Return whether the current attempt and its jobs are already cached."""
+    if run_attempt is None or jobs is None:
+        return False
+    if not any(attempt.run_attempt == run_attempt for attempt in attempts):
+        return False
 
-    for row in rows:
-        run_id = row.get("run_id")
-        run_attempt = row.get("run_attempt")
-        workflow_run_url = row.get("workflow_run_url")
-        workflow_status = row.get("workflow_status")
-        if not run_id or run_attempt is None or not workflow_run_url or not workflow_status:
-            continue
-
-        attempts_by_run.setdefault(str(run_id), {})[run_attempt] = RunAttemptInfo(
-            run_attempt=run_attempt,
-            workflow_run_url=workflow_run_url,
-            workflow_status=workflow_status,
-            workflow_conclusion=row.get("workflow_conclusion"),
-        )
-
-    return {
-        run_id: list(attempts.values())
-        for run_id, attempts in attempts_by_run.items()
+    job_attempts = {
+        entry.job.run_attempt for entry in jobs if entry.job.run_attempt is not None
     }
+    return not job_attempts or run_attempt in job_attempts
 
 
 def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
@@ -787,7 +818,9 @@ def repair_job_durations(path: str) -> int:
     changed = 0
 
     for row in rows:
-        duration = _duration_seconds(row.get("job_started_at"), row.get("job_completed_at"))
+        duration = _duration_seconds(
+            row.get("job_started_at"), row.get("job_completed_at")
+        )
         if duration != row.get("job_duration_sec"):
             row["job_duration_sec"] = duration
             changed += 1
@@ -884,11 +917,16 @@ def create_run_cache_entry(
 ) -> RunEntry:
     """Create a cache entry for a workflow run."""
     pr_number, pr_url = _extract_pull_request_info(run, owner, repo, host)
+    run_attempt = run.get("run_attempt")
     entry = RunEntry(
         run_id=run["id"],
         run_number=run["run_number"],
-        run_attempt=run.get("run_attempt"),
-        workflow_run_url=run["html_url"],
+        run_attempt=run_attempt,
+        workflow_run_url=(
+            workflow_run_attempt_url(host, owner, repo, run["id"], run_attempt)
+            if run_attempt is not None
+            else run["html_url"]
+        ),
         event=run.get("event"),
         head_branch=run.get("head_branch"),
         workflow_status=run["status"],
@@ -976,7 +1014,17 @@ def update_run_cache_entry(
     """
     cached.run_number = run["run_number"]
     cached.run_attempt = run.get("run_attempt")
-    cached.workflow_run_url = run["html_url"]
+    cached.workflow_run_url = (
+        workflow_run_attempt_url(
+            host,
+            owner,
+            repo,
+            run["id"],
+            cached.run_attempt,
+        )
+        if cached.run_attempt is not None
+        else run["html_url"]
+    )
     cached.event = run.get("event")
 
     # GitHub blanks head_branch to null once the branch itself gets deleted
@@ -1146,7 +1194,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # token's actual rate limit ceiling, so every sync stays protected even
     # without opting in explicitly. This single /rate_limit call (free, does
     # not itself consume quota) also serves as the fail-fast pre-flight check.
-    core = api_get(session, f"{base_url}/rate_limit", retries=1).json()["resources"]["core"]
+    core = api_get(session, f"{base_url}/rate_limit", retries=1).json()["resources"][
+        "core"
+    ]
 
     if args.quota_limit is not None:
         quota_limit = args.quota_limit
@@ -1208,10 +1258,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # ------------------------------------------------------------------
 
     existing_parquet_rows = load_parquet(str(parquet_file))
-    existing_run_ids, cached_jobs_by_run = cached_jobs_from_parquet(
-        existing_parquet_rows,
+    existing_run_ids, cached_jobs_by_run, cached_attempts_by_run = (
+        cached_data_from_parquet(existing_parquet_rows)
     )
-    cached_attempts_by_run = cached_attempts_from_parquet(existing_parquet_rows)
 
     # The JSON file is deliberately a snapshot of this request only.
     cache = WorkflowCache(
@@ -1302,7 +1351,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             f"\rFetching workflow runs ... quota limit reached ({len(runs)} run(s) fetched so far)\n"
         )
     else:
-        sys.stdout.write(f"\rFetching workflow runs ... done ({len(runs)} runs found)\n")
+        sys.stdout.write(
+            f"\rFetching workflow runs ... done ({len(runs)} runs found)\n"
+        )
     sys.stdout.flush()
 
     # ------------------------------------------------------------------
@@ -1357,7 +1408,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     # the currently-synced workflow's identity).
     own_workflow_id = str(workflow["id"])
     own_parquet_rows = [
-        row for row in existing_parquet_rows if row.get("workflow_id") == own_workflow_id
+        row
+        for row in existing_parquet_rows
+        if row.get("workflow_id") == own_workflow_id
     ]
     stale_active_run_ids = find_stale_active_run_ids(own_parquet_rows, known_run_ids)
 
@@ -1428,8 +1481,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         jobs_are_terminal = cached_jobs is not None and all(
             entry.job.completed_at is not None for entry in cached_jobs
         )
+        current_attempt_is_cached = cached_attempt_has_job_snapshot(
+            cached.run_attempt,
+            cached_attempts_by_run.get(run_id, []),
+            cached_jobs,
+        )
 
-        if run["status"] == "completed" and jobs_are_terminal:
+        if (
+            run["status"] == "completed"
+            and jobs_are_terminal
+            and current_attempt_is_cached
+        ):
             cached.jobs = cached_jobs
             cached.cache_updated_at = now_iso()
             completed_runs_in_response += 1

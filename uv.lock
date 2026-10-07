@@ -190,6 +190,9 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "cron-descriptor" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.5", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "plotly" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pygithub" },
@@ -198,15 +201,8 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-pandas = [
-    { name = "pandas", version = "2.3.3", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.5", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version >= '3.11'" },
-]
 viz = [
     { name = "duckdb" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.5", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "plotly" },
 ]
 
 [package.dev-dependencies]
@@ -230,16 +226,15 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.0" },
     { name = "cron-descriptor", specifier = ">=2.0.6" },
     { name = "duckdb", marker = "extra == 'viz'", specifier = ">=1.5.5" },
-    { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.2.0" },
-    { name = "pandas", marker = "extra == 'viz'", specifier = ">=2.3.3" },
-    { name = "plotly", marker = "extra == 'viz'", specifier = ">=7.0.0" },
+    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "plotly", specifier = ">=7.0.0" },
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "pygithub", specifier = ">=2.8.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "textual", specifier = ">=8.2.7" },
 ]
-provides-extras = ["pandas", "viz"]
+provides-extras = ["viz"]
 
 [package.metadata.requires-dev]
 dev = []

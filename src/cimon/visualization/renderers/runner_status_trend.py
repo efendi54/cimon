@@ -1,9 +1,5 @@
 # ruff: noqa: CPY001
-"""Render each runner's recorded status/busy history over time via Plotly.
-
-Requires the `viz` extra (`pandas`, `plotly`) -- imported lazily by the
-registry so the rest of `cimon` keeps working without it installed.
-"""
+"""Render each runner's recorded status/busy history over time via Plotly."""
 
 from __future__ import annotations
 

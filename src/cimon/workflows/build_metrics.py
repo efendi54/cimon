@@ -23,6 +23,7 @@ chart is generated, breaking cache-hit rate down per runner.
 """
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -31,6 +32,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 WORKFLOW_URL_RE = re.compile(
     r"^https://(?P<host>[^/]+)/"
@@ -49,6 +52,11 @@ BUILD_RE = re.compile(
 
 
 INFO_RE = re.compile(r"^(?P<ts>.*) INFO: (?P<body>\d+ process(?:es)?: .*cache hit,.*)$")
+
+
+BUILDBUDDY_RE = re.compile(
+    r"Streaming build results to:\s*(?P<url>https://\S+/invocation/\S+)"
+)
 
 
 CACHE_RE = {
@@ -315,13 +323,20 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
     per retry after a transient remote-cache error), so the entry is only
     finalized once the next 'bazel build' line (or EOF) is reached, using the
     last INFO line seen as the actual end timestamp and cache-hit numbers.
+    Likewise, the 'Streaming build results to: <url>' BuildBuddy link (if any)
+    is kept as `buildbuddy_url` on the entry.
     """
     builds: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
     def finalize(entry: dict[str, Any]) -> None:
         if "info_ts" not in entry:
-            raise RuntimeError("Missing INFO for build:\n" + entry["build_line"])
+            logger.warning(
+                "No matching 'INFO: ... cache hit' line found for build command; "
+                "cache metrics will be reported as n/a:\n%s",
+                entry["build_line"],
+            )
+            entry["info_missing"] = True
         builds.append(entry)
 
     with open(logfile, encoding="utf-8", errors="replace") as f:
@@ -337,6 +352,14 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                     "build_line": line.strip(),
                 }
                 current["targets"], current["configs"] = parse_bazel_build_args(line)
+                continue
+
+            bb = BUILDBUDDY_RE.search(line)
+
+            if bb and current is not None:
+                # Overwrite, same as the INFO line below: a retry's new
+                # invocation link replaces the previous attempt's.
+                current["buildbuddy_url"] = bb.group("url")
                 continue
 
             im = INFO_RE.search(line)
@@ -428,18 +451,60 @@ def generate_md_table_entries(
         f"**URL:** <{job_info['job_url']}>\n",
         f"**Duration:** {fmt(job_info['job_active_duration_sec'])}\n",
         "",
-        "Target | Config | Duration | Cache Hit Rate | Local Cache Eff. | Executed | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
+    missing_info_builds = [b for b in builds if b.get("info_missing")]
+    if missing_info_builds:
+        md.append("## ⚠️ Builds without cache metrics (missing INFO line)\n")
+        md.extend(f"- <code>{b['build_line']}</code>" for b in missing_info_builds)
+        md.append("")
+
+    md.extend(
+        [
+            "Target | Config | Duration | Cache Hit Rate | Local Cache Eff. | Executed | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
+            "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+
     for b in builds:
-        duration = b["duration_sec"]
-        c = b["cache"]
         config = "+".join(b["configs"]) if b["configs"] else "-"
 
-        rates = compute_cache_rates(c)
+        if b.get("info_missing"):
+            # No 'INFO: ... cache hit' line matched this build, e.g. the build
+            # failed before Bazel printed its summary; render n/a instead of
+            # raising so the rest of the report is still produced.
+            duration_cell = "n/a"
+            hit_rate_cell = "**n/a**"
+            local_eff_cell = executed_cell = "n/a"
+            action_cell = remote_cell = internal_cell = local_cell = sandbox_cell = (
+                "n/a"
+            )
+            hits_cell = total_cell = "n/a"
+            info_line = "*(no matching INFO line found)*"
+        else:
+            c = b["cache"]
+            rates = compute_cache_rates(c)
 
-        cell = f"<code>{b['build_line']}</code><br><code>{b['info_line']}</code>"
+            duration_cell = fmt(b["duration_sec"])
+            hit_rate_cell = f"**{rates['hit_rate']:.1f}%**"
+            local_eff_cell = _fmt_rate(rates["local_cache_effectiveness"])
+            executed_cell = _fmt_rate(rates["executed_share"])
+            action_cell, remote_cell, internal_cell, local_cell, sandbox_cell = (
+                c["action"],
+                c["remote"],
+                c["internal"],
+                c["local"],
+                c["sandbox"],
+            )
+            hits_cell, total_cell = rates["hits"], rates["total"]
+            info_line = f"<code>{b['info_line']}</code>"
+
+        buildbuddy_url = b.get("buildbuddy_url")
+        buildbuddy_line = (
+            f'<br><a href="{buildbuddy_url}">BuildBuddy</a>' if buildbuddy_url else ""
+        )
+
+        cell = f"<code>{b['build_line']}</code><br>{info_line}{buildbuddy_line}"
 
         # Bazel reports cache stats per invocation, not per target, so every
         # target of a multi-target build shares the same duration/rate/cache.
@@ -447,17 +512,17 @@ def generate_md_table_entries(
             md.append(
                 f"| {target} "
                 f"| {config} "
-                f"| {fmt(duration)} "
-                f"| **{rates['hit_rate']:.1f}%** "
-                f"| {_fmt_rate(rates['local_cache_effectiveness'])} "
-                f"| {_fmt_rate(rates['executed_share'])} "
-                f"| {c['action']} "
-                f"| {c['remote']} "
-                f"| {c['internal']} "
-                f"| {c['local']} "
-                f"| {c['sandbox']} "
-                f"| {rates['hits']} "
-                f"| {rates['total']} "
+                f"| {duration_cell} "
+                f"| {hit_rate_cell} "
+                f"| {local_eff_cell} "
+                f"| {executed_cell} "
+                f"| {action_cell} "
+                f"| {remote_cell} "
+                f"| {internal_cell} "
+                f"| {local_cell} "
+                f"| {sandbox_cell} "
+                f"| {hits_cell} "
+                f"| {total_cell} "
                 f"| {cell} |"
             )
 
@@ -474,8 +539,20 @@ def flatten_metric_rows(
     rows: list[dict[str, Any]] = []
 
     for b in builds:
-        rates = compute_cache_rates(b["cache"])
         config = "+".join(b["configs"]) if b["configs"] else "-"
+
+        if b.get("info_missing"):
+            duration_sec = None
+            rates: dict[str, float | int | None] = {
+                "hit_rate": None,
+                "local_cache_effectiveness": None,
+                "executed_share": None,
+                "hits": None,
+                "total": None,
+            }
+        else:
+            duration_sec = b["duration_sec"]
+            rates = compute_cache_rates(b["cache"])
 
         for target in b["targets"]:
             rows.append(
@@ -486,7 +563,7 @@ def flatten_metric_rows(
                     "start_ts": b["start_ts"],
                     "target": target,
                     "config": config,
-                    "duration_sec": b["duration_sec"],
+                    "duration_sec": duration_sec,
                     "hit_rate": rates["hit_rate"],
                     "local_cache_effectiveness": rates["local_cache_effectiveness"],
                     "executed_share": rates["executed_share"],

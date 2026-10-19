@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Pause before the script (and thus an auto-closing terminal) exits, no matter
+# how it exits, so quota/other errors stay readable instead of vanishing.
+trap 'echo; read -n 1 -s -r -p "Press any key to close this window..."; echo' EXIT
 
 # CAUTION: change this later
 # -->>
@@ -43,7 +46,11 @@ if [ $# -ge 2 ]; then
 fi
 
 for wf in "${wf_files[@]}"; do
-  uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"  
+  if ! uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"; then
+    rc=$?
+    echo "cimon sync failed for workflow '$wf' (exit code $rc, likely quota limit reached). Stopping sync." >&2
+    break
+  fi
 done
 # uv run cimon sync --workflow pr.yml --from-date "$(date -I)"
 # uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"

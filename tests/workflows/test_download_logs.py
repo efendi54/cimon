@@ -344,3 +344,42 @@ def test_run_continues_after_a_job_log_fails_to_download(
 
     table = pq.read_table(output_path)
     assert table.column("job_name").to_pylist() == ["build"]
+
+
+def test_run_skips_github_auth_for_already_cached_logs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached log must not trigger `ensure_github_auth` (and thus no GitHub API call)."""
+    auth_calls: list[str] = []
+    download_calls: list[str] = []
+
+    monkeypatch.setattr(
+        build_metrics,
+        "ensure_github_auth",
+        auth_calls.append,
+    )
+    monkeypatch.setattr(
+        build_metrics,
+        "download_job_log",
+        lambda _host, _owner, _repo, job_id, output_dir: download_calls.append(job_id)
+        or _fake_download_job_log(_host, _owner, _repo, job_id, output_dir),
+    )
+
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    output_dir = tmp_path / "out"
+    download_logs.run(str(input_path), output_dir, keep_logs=True)
+
+    assert sorted(auth_calls) == ["github.com", "github.com", "github.com"]
+    assert sorted(download_calls) == ["1", "2", "3"]
+
+    auth_calls.clear()
+    download_calls.clear()
+
+    # Second run over the same (now cached) logs must not touch GitHub at all.
+    download_logs.run(str(input_path), output_dir, keep_logs=True)
+
+    assert auth_calls == []
+    assert download_calls == []

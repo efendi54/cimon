@@ -145,6 +145,30 @@ def get_job_info(
     }
 
 
+def load_cached_job_info(json_file: Path) -> dict[str, Any] | None:
+    """Reuse `job_name`/`job_active_duration_sec` from a prior run's `<job_id>.json`.
+
+    A completed job's name and active duration never change, so if
+    `process_job_run` already wrote them out once, there's no need to call
+    `get_job_info` (a `gh api` call) again -- this mirrors the log-file
+    caching in `download_job_log_for_url`. Returns `None` (instead of
+    raising) for a missing or malformed/partial file, so the caller falls
+    back to fetching fresh job info from GitHub.
+    """
+    if not json_file.is_file():
+        return None
+
+    try:
+        with open(json_file, encoding="utf-8") as f:
+            cached = json.load(f)
+        return {
+            "job_name": cached["job_name"],
+            "job_active_duration_sec": cached["job_active_duration_sec"],
+        }
+    except (json.JSONDecodeError, KeyError, OSError):
+        return None
+
+
 def download_job_log_for_url(
     workflow_url: str,
     output_root: Path,
@@ -156,6 +180,11 @@ def download_job_log_for_url(
     layout, cached-log reuse, and GitHub auth handling. Returns the log path
     plus the URL's regex-parsed components (host/owner/repo/run_id/job_id),
     so callers needing more job data don't have to re-parse the URL.
+
+    The cache is checked before touching GitHub at all: if the log is
+    already present, neither `ensure_github_auth` nor any `gh api` call is
+    made, so re-running over already-downloaded logs doesn't consume any
+    GitHub API quota.
     """
     match = WORKFLOW_URL_RE.match(workflow_url)
 
@@ -165,6 +194,11 @@ def download_job_log_for_url(
     info = match.groupdict()
     output_dir = output_root / info["run_id"]
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    logfile = output_dir / f"{info['job_id']}.log"
+    if logfile.is_file() and logfile.stat().st_size > 0:
+        print(f"Using cached job log {logfile}")
+        return logfile, info
 
     ensure_github_auth(info["host"])
 
@@ -892,18 +926,28 @@ def process_job_run(
 
     Returns its parsed `builds` and `job_info`, so callers processing several
     job runs (see `process_input`) can aggregate them without re-parsing.
+
+    `job_name`/`job_active_duration_sec` are reused from a prior run's
+    `<job_id>.json` when present (see `load_cached_job_info`), so re-running
+    over already-processed jobs doesn't call `get_job_info` -- and thus the
+    GitHub API -- again.
     """
     log_file, info = download_job_log_for_url(workflow_url, output_root)
     output_dir = log_file.parent
 
     builds = parse_log(log_file)
 
-    job_info = get_job_info(
-        info["host"],
-        info["owner"],
-        info["repo"],
-        info["job_id"],
-    )
+    json_file = output_dir / f"{info['job_id']}.json"
+    job_info = load_cached_job_info(json_file)
+    if job_info is not None:
+        print(f"Using cached job info {json_file}")
+    else:
+        job_info = get_job_info(
+            info["host"],
+            info["owner"],
+            info["repo"],
+            info["job_id"],
+        )
     job_info["job_url"] = workflow_url
 
     build_metrics = {
@@ -912,8 +956,6 @@ def process_job_run(
         "job_active_duration_sec": job_info["job_active_duration_sec"],
         "build_info": builds,
     }
-
-    json_file = output_dir / f"{info['job_id']}.json"
 
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(

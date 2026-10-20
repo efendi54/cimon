@@ -5,7 +5,7 @@ set -euo pipefail
 # Pause before the script (and thus an auto-closing terminal) exits, no matter
 # how it exits, so quota/other errors stay readable instead of vanishing.
 # Skipped when run non-interactively (e.g. from
-# backfill_static_runner_workflows.sh), so it doesn't hang waiting for a
+# cyclic_sync.sh), so it doesn't hang waiting for a
 # keypress that will never come.
 if [ -z "${CIMON_SYNC_NONINTERACTIVE:-}" ]; then
   trap 'echo; read -n 1 -s -r -p "Press any key to close this window..."; echo' EXIT
@@ -50,7 +50,7 @@ for wf in "${workflows[@]}"; do
   # then rc=$?; fi" -- `$?` right after a negated ("!") condition reflects
   # the *negated* status (always 0 on failure), not cimon's actual exit
   # code, which would make a quota failure here look like a success to any
-  # caller (e.g. backfill_static_runner_workflows.sh) checking this script's
+  # caller (e.g. cyclic_sync.sh) checking this script's
   # own exit status.
   uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE" --workers 10 || rc=$?
   if [ "$rc" -ne 0 ]; then

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Drives sync_static_runner_workflows.sh across a range of one-day windows,
+# Drives the script specified by SYNC_SCRIPT across a range of one-day windows,
 # e.g. --from-date 2026-09-20 --to-date 2026-09-21, then
 # --from-date 2026-09-21 --to-date 2026-09-22, and so on, up to and including
 # a window starting on END_DATE itself (--from-date END_DATE --to-date
@@ -32,8 +32,8 @@
 # (e.g. network issue) and as an upper bound against implausible reset
 # values.
 #
-# Usage: backfill_static_runner_workflows.sh [START_DATE] [END_DATE]
-#   START_DATE defaults to 2026-09-20, END_DATE defaults to 2026-10-19.
+# Usage: SYNC_SCRIPT=/path/to/sync-script.sh cyclic_sync.sh [START_DATE] [END_DATE]
+#   START_DATE and END_DATE default to today's date.
 
 set -euo pipefail
 
@@ -41,11 +41,18 @@ set -euo pipefail
 # how it exits, so quota/other errors stay readable instead of vanishing.
 trap 'echo; read -n 1 -s -r -p "Press any key to close this window..."; echo' EXIT
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SYNC_SCRIPT="$SCRIPT_DIR/sync_static_runner_workflows.sh"
+if [[ -z "${SYNC_SCRIPT:-}" ]]; then
+  echo "Error: SYNC_SCRIPT environment variable must be set to the sync script path." >&2
+  exit 1
+fi
+if [[ ! -r "$SYNC_SCRIPT" ]]; then
+  echo "Error: SYNC_SCRIPT does not point to a readable file: $SYNC_SCRIPT" >&2
+  exit 1
+fi
 
-START_DATE="${1:-2026-09-20}"
-END_DATE="${2:-2026-10-19}"
+TODAY="$(date -I)"
+START_DATE="${1:-$TODAY}"
+END_DATE="${2:-$TODAY}"
 RETRY_DELAY_SECONDS="${RETRY_DELAY_SECONDS:-3600}"
 WINDOW_TIMEOUT_SECONDS="${WINDOW_TIMEOUT_SECONDS:-300}"
 TIMEOUT_RETRY_DELAY_SECONDS="${TIMEOUT_RETRY_DELAY_SECONDS:-60}"

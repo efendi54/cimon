@@ -69,7 +69,7 @@ def test_prune_runs_plain_date_window_covers_the_whole_day(tmp_path: Path) -> No
     "2026-08-01T00:00:00Z" sorts before the bare date "2026-08-02" but not
     before "2026-08-01" itself -- so covering day X fully requires
     --to-date to be the *next* day, exactly like `cimon sync` and
-    backfill_static_runner_workflows.sh already do.
+    cyclic_sync.sh already does.
     """
     path = tmp_path / "workflows.parquet"
     _write_sample(path)

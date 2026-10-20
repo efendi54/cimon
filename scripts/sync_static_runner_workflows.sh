@@ -52,7 +52,7 @@ for wf in "${workflows[@]}"; do
   # code, which would make a quota failure here look like a success to any
   # caller (e.g. backfill_static_runner_workflows.sh) checking this script's
   # own exit status.
-  uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE" || rc=$?
+  uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE" --workers 10 || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "cimon sync failed for workflow '$wf' (exit code $rc, likely quota limit reached). Stopping sync." >&2
     exit "$rc"

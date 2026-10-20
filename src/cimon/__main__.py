@@ -327,12 +327,13 @@ def _date_boundary_option(value: str) -> str:
 )
 @click.option(
     "--from-date",
-    required=True,
+    default="0001-01-01",
     type=_date_boundary_option,
     metavar="DATE",
     help="Start of the created-at range to remove: YYYY-MM-DD, or an "
     "ISO-8601 timestamp (e.g. 2026-08-25T08:00:00Z) for hour/minute "
-    "precision. Inclusive, same semantics as `cimon sync`'s --from-date.",
+    "precision. Inclusive, same semantics as `cimon sync`'s --from-date. "
+    "Defaults to 0001-01-01 (all earlier runs).",
 )
 @click.option(
     "--to-date",
@@ -342,20 +343,33 @@ def _date_boundary_option(value: str) -> str:
     help="End of the created-at range to remove: YYYY-MM-DD, or an "
     "ISO-8601 timestamp. Inclusive, same semantics as `cimon sync`'s --to-date.",
 )
-def prune_runs(parquet_file: Path, from_date: str, to_date: str) -> None:
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show how many rows would be removed without modifying the Parquet file.",
+)
+def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) -> None:
     """Remove every run created within [--from-date, --to-date] from a workflows Parquet cache, in place.
 
     PARQUET_FILE is the workflows Parquet cache to modify (e.g.
     ~/.cache/cimon/workflows.parquet). Matching runs (all of their job rows)
-    are removed; everything else is kept unchanged. Written back atomically,
-    same as the rest of the cache tooling.
+    are removed; everything else is kept unchanged. Use --dry-run to preview
+    the number of rows that would be removed without changing the file.
     """
     before = ds.dataset(parquet_file, format="parquet").count_rows()
 
     table = WorkflowQuery(parquet_file).created_outside(from_date, to_date).to_table()
-    write_table_atomic(table, parquet_file)
-
     removed = before - table.num_rows
+
+    if dry_run:
+        logger.info(
+            f"Dry run: would remove {removed} row(s) created between {from_date} "
+            f"and {to_date} from {parquet_file} ({table.num_rows} row(s) would remain); "
+            "the file was not modified.",
+        )
+        return
+
+    write_table_atomic(table, parquet_file)
     logger.info(
         f"Removed {removed} row(s) created between {from_date} and {to_date} "
         f"from {parquet_file} ({table.num_rows} row(s) remain).",

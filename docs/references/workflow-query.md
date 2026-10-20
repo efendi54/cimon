@@ -86,8 +86,10 @@ Generic building blocks usable for anything else: `where(**equals)`,
 `pull_request`, `schedule`, `workflow_dispatch`).
 
 `created_outside` (the complement of `created_between`) backs the
-`cimon prune-runs PARQUET_FILE --from-date ... --to-date ...` CLI command,
-which removes every run created within that range from a workflows Parquet
+`cimon prune-runs PARQUET_FILE --to-date ...` CLI command (`--from-date`
+is optional and defaults to `0001-01-01`; `--dry-run` reports the number of
+matching rows without modifying the Parquet file). Without `--dry-run`, the
+command removes every run created within that range from a workflows Parquet
 cache in place -- e.g. to drop a bad backfill window before re-syncing it.
 
 ## Declarative spec (YAML/JSON)

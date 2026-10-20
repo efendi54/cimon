@@ -1,11 +1,14 @@
 # ruff: noqa: CPY001
 """CI Monitor CLI tool for tracking GitHub Actions workflow runs and other stuff."""
 
+import argparse
+import json
 import logging
 import sys
 from pathlib import Path
 
 import click
+import pyarrow.dataset as ds
 import requests
 import yaml
 
@@ -15,6 +18,7 @@ from cimon.github_api import (
     QuotaLimitReachedError,
     append_runner_snapshot,
     create_session,
+    fetch_quota,
     list_runners,
     print_quota,
     print_runner_status,
@@ -45,7 +49,13 @@ logger = logging.getLogger(__name__)
 )
 def main(log_level: str, log_file: Path | None) -> None:
     """Main entry point for the GitHub Workflow Visualizer CLI."""
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    # `cimon quota --json` must print a single, clean JSON line on stdout for
+    # scripts to parse (e.g. `cimon quota --json | jq -r '.reset'`) -- keep
+    # this invocation's log messages (including the "Command line: ..." line
+    # right below) off stdout entirely in that case, still writing them to
+    # --log-file as usual.
+    json_quota_mode = "quota" in sys.argv and "--json" in sys.argv
+    handlers: list[logging.Handler] = [] if json_quota_mode else [logging.StreamHandler(sys.stdout)]
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
@@ -72,7 +82,16 @@ def main(log_level: str, log_file: Path | None) -> None:
     required=False,
     help="GitHub API host, e.g. git.hub.vwgroup.com. Defaults to GH_HOST.",
 )
-def quota(token: str | None, host: str | None) -> None:
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=False,
+    help="Print the quota as a single JSON object on stdout (keys: limit, "
+    "used, remaining, reset [Unix timestamp]) instead of a human-readable "
+    "summary -- e.g. for `cimon quota --json | jq -r '.reset'` in scripts.",
+)
+def quota(token: str | None, host: str | None, *, as_json: bool) -> None:
     """Show the GitHub API quota."""
     if not token:
         msg = (
@@ -87,7 +106,12 @@ def quota(token: str | None, host: str | None) -> None:
 
     try:
         session = create_session(token)
-        print_quota(session, f"https://{host}/api/v3")
+        if as_json:
+            # No stdout log handler is configured for this invocation (see
+            # main()), so this is the only thing printed on stdout.
+            click.echo(json.dumps(fetch_quota(session, f"https://{host}/api/v3")))
+        else:
+            print_quota(session, f"https://{host}/api/v3")
     except requests.RequestException:
         logger.exception("Failed to fetch GitHub API quota")
         raise click.Abort from None
@@ -286,6 +310,56 @@ def repair_cache(cache_dir: Path) -> None:
     parquet_file = Path(cache_dir).resolve() / synch.WORKFLOWS_PARQUET_FILE_NAME
     changed = synch.repair_job_durations(str(parquet_file))
     logger.info(f"Repaired {changed} value(s) in {parquet_file}")
+
+
+def _date_boundary_option(value: str) -> str:
+    """Adapt `synch.parse_date_boundary` (an argparse `type=`) for use as a click option type."""
+    try:
+        return synch.parse_date_boundary(value)
+    except argparse.ArgumentTypeError as exc:
+        raise click.BadParameter(str(exc)) from exc
+
+
+@main.command("prune-runs")
+@click.argument(
+    "parquet_file",
+    type=click.Path(exists=True, dir_okay=False, writable=True, path_type=Path),
+)
+@click.option(
+    "--from-date",
+    required=True,
+    type=_date_boundary_option,
+    metavar="DATE",
+    help="Start of the created-at range to remove: YYYY-MM-DD, or an "
+    "ISO-8601 timestamp (e.g. 2026-08-25T08:00:00Z) for hour/minute "
+    "precision. Inclusive, same semantics as `cimon sync`'s --from-date.",
+)
+@click.option(
+    "--to-date",
+    required=True,
+    type=_date_boundary_option,
+    metavar="DATE",
+    help="End of the created-at range to remove: YYYY-MM-DD, or an "
+    "ISO-8601 timestamp. Inclusive, same semantics as `cimon sync`'s --to-date.",
+)
+def prune_runs(parquet_file: Path, from_date: str, to_date: str) -> None:
+    """Remove every run created within [--from-date, --to-date] from a workflows Parquet cache, in place.
+
+    PARQUET_FILE is the workflows Parquet cache to modify (e.g.
+    ~/.cache/cimon/workflows.parquet). Matching runs (all of their job rows)
+    are removed; everything else is kept unchanged. Written back atomically,
+    same as the rest of the cache tooling.
+    """
+    before = ds.dataset(parquet_file, format="parquet").count_rows()
+
+    table = WorkflowQuery(parquet_file).created_outside(from_date, to_date).to_table()
+    write_table_atomic(table, parquet_file)
+
+    removed = before - table.num_rows
+    logger.info(
+        f"Removed {removed} row(s) created between {from_date} and {to_date} "
+        f"from {parquet_file} ({table.num_rows} row(s) remain).",
+    )
 
 
 @main.command("query")

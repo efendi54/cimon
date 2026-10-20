@@ -116,6 +116,16 @@ def test_workflow_conclusion_filter(tmp_path: Path) -> None:
     assert [row["run_id"] for row in result] == ["101"]
 
 
+def test_created_outside_filter(tmp_path: Path) -> None:
+    """created_outside() keeps only runs NOT created within the given range."""
+    path = tmp_path / "workflows.parquet"
+    _write_sample(path)
+
+    result = WorkflowQuery(path).created_outside("2026-08-10T00:00:00Z", "2026-08-16T00:00:00Z").to_pylist()
+
+    assert [row["run_id"] for row in result] == ["100", "102"]
+
+
 def test_chained_filters_and_column_pruning(tmp_path: Path) -> None:
     """Chained filters combine with AND and `columns()` restricts the output."""
     path = tmp_path / "workflows.parquet"

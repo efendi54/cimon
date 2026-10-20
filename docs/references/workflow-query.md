@@ -76,13 +76,19 @@ are read from disk. Nothing touches disk until `to_table()`/`to_pylist()` is
 called.
 
 Built-in shortcuts: `run_id`, `event`, `workflow_conclusion`, `job_conclusion`,
-`job_name`, `job_status`, `runner_label`, `created_between`. Generic building
-blocks usable for anything else: `where(**equals)`, `isin(column, values)`,
-`between(column, low, high)`, `not_null(column)`, and the escape hatch
+`job_name`, `job_status`, `runner_label`, `created_between`, `created_outside`.
+Generic building blocks usable for anything else: `where(**equals)`,
+`isin(column, values)`, `between(column, low, high)`,
+`not_between(column, low, high)`, `not_null(column)`, and the escape hatch
 `filter(expr)` for an arbitrary `pyarrow.dataset` expression.
 
 `event` holds the GitHub Actions event that triggered the run (e.g. `push`,
 `pull_request`, `schedule`, `workflow_dispatch`).
+
+`created_outside` (the complement of `created_between`) backs the
+`cimon prune-runs PARQUET_FILE --from-date ... --to-date ...` CLI command,
+which removes every run created within that range from a workflows Parquet
+cache in place -- e.g. to drop a bad backfill window before re-syncing it.
 
 ## Declarative spec (YAML/JSON)
 

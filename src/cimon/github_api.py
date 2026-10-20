@@ -179,10 +179,25 @@ def api_get(
     raise RuntimeError(msg)
 
 
-def print_quota(session: requests.Session, base_url: str) -> None:
-    """Log the current GitHub API quota information."""
+def fetch_quota(session: requests.Session, base_url: str) -> dict[str, int]:
+    """Fetch the current GitHub API core quota as a plain dict.
+
+    Keys: `limit`, `used`, `remaining`, `reset` (the latter a Unix timestamp,
+    as returned by the GitHub API).
+    """
     data = api_get(session, f"{base_url}/rate_limit", retries=1).json()
     core = data["resources"]["core"]
+    return {
+        "limit": core["limit"],
+        "used": core["used"],
+        "remaining": core["remaining"],
+        "reset": core["reset"],
+    }
+
+
+def print_quota(session: requests.Session, base_url: str) -> None:
+    """Log the current GitHub API quota information."""
+    core = fetch_quota(session, base_url)
 
     reset = dt.datetime.fromtimestamp(core["reset"], tz=dt.timezone.utc)
     logger.info(

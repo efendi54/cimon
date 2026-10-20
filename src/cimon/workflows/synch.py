@@ -1049,13 +1049,17 @@ def update_run_cache_entry(
     cached.cache_updated_at = now_iso()
 
 
-def _parse_date_boundary(value: str) -> str:
+def parse_date_boundary(value: str) -> str:
     """
     Validate a --from-date/--to-date value.
 
     Accepts a plain date (YYYY-MM-DD) or a full ISO-8601 timestamp
     (YYYY-MM-DDTHH:MM:SS[Z|+HH:MM]) for hour/minute-precision date ranges,
     passed straight through to GitHub's "created" query filter unchanged.
+
+    Public (not just used as this module's own argparse `type=`) so other
+    date-range options -- e.g. `cimon prune-runs`'s --from-date/--to-date --
+    can share the exact same validation and accepted formats.
     """
     try:
         dt.date.fromisoformat(value)
@@ -1119,7 +1123,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     parser.add_argument(
         "--from-date",
         default=today,
-        type=_parse_date_boundary,
+        type=parse_date_boundary,
         help="Start of the created-at filter: YYYY-MM-DD, or an ISO-8601 "
         "timestamp (e.g. 2026-08-25T08:00:00Z) for hour/minute precision -- "
         "useful to stay under GitHub's 1000-result pagination cap on busy days",
@@ -1128,7 +1132,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     parser.add_argument(
         "--to-date",
         default=today,
-        type=_parse_date_boundary,
+        type=parse_date_boundary,
         help="End of the created-at filter: YYYY-MM-DD, or an ISO-8601 "
         "timestamp (e.g. 2026-08-25T12:00:00Z) for hour/minute precision",
     )

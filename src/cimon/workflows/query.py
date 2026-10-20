@@ -79,6 +79,10 @@ class WorkflowQuery:
         """Keep rows where `low <= column <= high`."""
         return self.filter((ds.field(column) >= low) & (ds.field(column) <= high))
 
+    def not_between(self, column: str, low: Any, high: Any) -> WorkflowQuery:  # noqa: ANN401
+        """Keep rows where `column` is NOT within `[low, high]` -- the complement of `between()`."""
+        return self.filter(~((ds.field(column) >= low) & (ds.field(column) <= high)))
+
     def not_null(self, column: str) -> WorkflowQuery:
         """Keep rows where `column` is not null."""
         return self.filter(ds.field(column).is_valid())
@@ -121,6 +125,13 @@ class WorkflowQuery:
     def created_between(self, start: str, end: str) -> WorkflowQuery:
         """Keep runs created within `[start, end]` (ISO 8601 timestamps)."""
         return self.between("created_at", start, end)
+
+    def created_outside(self, start: str, end: str) -> WorkflowQuery:
+        """Keep runs NOT created within `[start, end]` (ISO 8601 timestamps).
+
+        The complement of `created_between()`.
+        """
+        return self.not_between("created_at", start, end)
 
     def columns(self, *names: str) -> WorkflowQuery:
         """Restrict which columns are read from disk (column pruning)."""

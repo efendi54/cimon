@@ -128,7 +128,8 @@ uv run cimon repair-cache --cache-dir .
 #### Quota
 
 Since every sync consumes GitHub API quota, check how much is left (reads
-`GH_TOKEN`/`GITHUB_TOKEN` and `GH_HOST` from the environment, same as `sync`):
+`GH_TOKEN`/`GITHUB_TOKEN` and `GH_HOST` from the environment, same as `sync`
+(a matching `~/.netrc` entry for the host takes precedence over the token)):
 
 ```bash
 uv run cimon quota
@@ -278,7 +279,8 @@ strings instead of `build-metrics`' `{"job": {...}}` entries.
 
 For Parquet input, an optional `job_runner_name` column is carried into the
 runner comparison chart. The command uses `gh api`, so GitHub CLI must be
-authenticated for the URL's host (`GH_TOKEN` and `GH_HOST` can be used).
+authenticated for the URL's host (`GH_TOKEN` and `GH_HOST` can be used; a
+matching `~/.netrc` entry takes precedence over `GH_TOKEN`).
 
 ```mermaid
 flowchart LR
@@ -404,11 +406,12 @@ simply downloaded and no output file is written:
 uv run cimon download-logs -i build_jobs.parquet -p "ERROR:" -o out/logs
 ```
 
-Downloaded logs go into a temporary directory removed again once the run
-finishes. Pass `--keep-logs` to instead keep them under `OUTPUT_DIR/logs`,
-persisted across runs, so a later call over the same (or an overlapping)
-input can skip logs it already downloaded without consuming GitHub API quota
-again.
+Downloaded logs always go into, and stay in, `OUTPUT_DIR/logs`, persisted
+across runs, so a later call over the same (or an overlapping) input can
+skip logs it already downloaded without consuming GitHub API quota again.
+Pass `--clear-logs` together with `-p/--pattern` to delete the logs of
+non-matching jobs again once the analysis is done, keeping only the logs of
+matching jobs on disk.
 
 ### Visualizations
 

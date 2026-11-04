@@ -33,6 +33,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from cimon.github_api import resolve_token
+
 logger = logging.getLogger(__name__)
 
 WORKFLOW_URL_RE = re.compile(
@@ -93,6 +95,10 @@ def extract(body: str, key: str) -> int:
 
 
 def ensure_github_auth(host: str) -> None:
+    # `gh` prefers GH_TOKEN over its own stored login, so a ~/.netrc entry wins by exporting it.
+    if token := resolve_token(host, os.environ.get("GH_TOKEN")):
+        os.environ["GH_TOKEN"] = token
+
     result = subprocess.run(
         ["gh", "auth", "status", "--hostname", host],
         stdout=subprocess.DEVNULL,

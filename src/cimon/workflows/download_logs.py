@@ -4,20 +4,24 @@
 Accepts a single workflow-job URL, a JSON array of URL strings, or a Parquet
 file with a `job_url` column (e.g. produced by `cimon query -c job_url`) --
 see `resolve_job_urls`. Each job's log is downloaded via the shared
-`download_job_log_for_url` routine into `<run_id>/<job_id>.log`, the same
-layout used by `cimon build-metrics`.
+`download_job_log_for_url` routine into `output_dir/logs/<run_id>/<job_id>.log`,
+the same layout used by `cimon build-metrics`.
 
-By default that directory is a temporary one, removed again once this run
-finishes. Pass `keep_logs=True` to instead keep it under `output_dir/logs`,
-persisted across runs -- so a later run over the same (or an overlapping)
-input can skip logs it already downloaded, without consuming GitHub API
-quota again.
+Downloaded logs are always kept (never silently deleted at the end of a run)
+so a later call over the same/overlapping input can skip logs it already
+downloaded, without consuming GitHub API quota again. The directory logs are
+being written into is always logged, so it's visible even when nothing else
+is printed.
 
 If a `pattern` (regular expression) is given, every matched job is written
 to `log-match.parquet` in the output directory (Parquet input keeps all of
 its original columns; URL/JSON input only produces a `job_url` column); if
 nothing matched, a warning is logged and no output file is written. Without
 a `pattern`, logs are simply downloaded and no output file is produced.
+
+Pass `clear_logs=True` (only meaningful together with `pattern`) to delete
+every downloaded log that did *not* match the pattern once the analysis is
+done, keeping only the logs of matching jobs on disk.
 """
 
 from __future__ import annotations
@@ -26,9 +30,7 @@ import contextlib
 import logging
 import re
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -36,27 +38,17 @@ import pyarrow.parquet as pq
 from cimon.parquet_io import write_table_atomic
 from cimon.workflows.build_metrics import download_job_log_for_url, resolve_job_urls
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
 logger = logging.getLogger(__name__)
 
 LOG_MATCH_PARQUET_FILE_NAME = "log-match.parquet"
 LOGS_DIR_NAME = "logs"
 
 
-@contextlib.contextmanager
-def _logs_directory(output_dir: Path, *, keep_logs: bool) -> Iterator[Path]:
-    """Yield the directory to download logs into: persistent if `keep_logs`, a tempdir otherwise."""
-    if keep_logs:
-        logs_dir = output_dir / LOGS_DIR_NAME
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Keeping downloaded logs in {logs_dir}")
-        yield logs_dir
-        return
-
-    with tempfile.TemporaryDirectory(prefix="cimon-download-logs-") as tmp_dir:
-        yield Path(tmp_dir)
+def _logs_directory(output_dir: Path) -> Path:
+    """Return (creating if needed) the persistent directory to download logs into."""
+    logs_dir = output_dir / LOGS_DIR_NAME
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir
 
 
 def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
@@ -81,11 +73,31 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
         return None
     except subprocess.CalledProcessError as exc:
         logger.warning(
-            f"{progress} Skipping {job_url}: failed to download its log ({exc})"
+            f"{progress} Skipping {job_url}: failed to download its log ({exc})",
         )
         return None
 
     return log_path
+
+
+def _delete_non_matching_logs(log_paths: dict[int, Path], matched_indices: list[int]) -> None:
+    """Delete every downloaded log in `log_paths` whose index isn't in `matched_indices`.
+
+    Also removes the per-run directory (`<run_id>/`) once it's left empty,
+    so a cleared-out run doesn't leave a trail of empty directories behind.
+    """
+    matched = set(matched_indices)
+    deleted = 0
+    for index, log_path in log_paths.items():
+        if index in matched:
+            continue
+        log_path.unlink(missing_ok=True)
+        deleted += 1
+        # Directory not empty (other jobs of the same run matched) -- keep it.
+        with contextlib.suppress(OSError):
+            log_path.parent.rmdir()
+    if deleted:
+        logger.info(f"Deleted {deleted} non-matching log(s).")
 
 
 def run(
@@ -93,7 +105,7 @@ def run(
     output_dir: Path,
     pattern: str | None = None,
     *,
-    keep_logs: bool = False,
+    clear_logs: bool = False,
 ) -> Path | None:
     """Download every job's log resolved from `input_arg`, optionally filtering by `pattern`.
 
@@ -102,14 +114,20 @@ def run(
     of its original columns in `log-match.parquet`; the other two forms only
     produce a `job_url` column.
 
-    If `keep_logs` is set, downloaded logs are kept under `output_dir/logs`
-    instead of a temporary directory, so a later call can skip logs it
-    already downloaded (see `_logs_directory`).
+    Downloaded logs are always kept under `output_dir/logs`, so a later call
+    can skip logs it already downloaded (see `_logs_directory`). If
+    `clear_logs` is set (only meaningful together with `pattern`), every log
+    that did *not* match `pattern` is deleted again once the analysis is
+    done.
 
     If `pattern` is given, returns the path of `log-match.parquet` once at
     least one log matched it, `None` if none did. Without `pattern`, always
     returns `None` -- every job's log is downloaded and nothing is written.
     """
+    if clear_logs and pattern is None:
+        msg = "clear_logs only has an effect together with a pattern -- pass one, or drop clear_logs."
+        raise ValueError(msg)
+
     regex = None
     if pattern is not None:
         try:
@@ -132,23 +150,32 @@ def run(
 
     total = len(job_urls)
     matched_indices: list[int] = []
+    log_paths: dict[int, Path] = {}
 
-    with _logs_directory(output_dir, keep_logs=keep_logs) as logs_dir:
-        for index, job_url in enumerate(job_urls, start=1):
-            if not job_url:
-                continue
+    logs_dir = _logs_directory(output_dir)
+    logger.info(f"Downloading logs into {logs_dir}")
 
-            progress = f"[{index}/{total}] ({index / total:.0%})"
-            log_path = _download_log(job_url, logs_dir, progress)
-            if log_path is None or regex is None:
-                continue
+    for index, job_url in enumerate(job_urls, start=1):
+        if not job_url:
+            continue
 
-            content = log_path.read_text(encoding="utf-8", errors="replace")
-            if regex.search(content):
-                matched_indices.append(index - 1)
+        progress = f"[{index}/{total}] ({index / total:.0%})"
+        log_path = _download_log(job_url, logs_dir, progress)
+        if log_path is None:
+            continue
+        log_paths[index - 1] = log_path
+
+        if regex is None:
+            continue
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+        if regex.search(content):
+            matched_indices.append(index - 1)
 
     if regex is None:
         return None
+
+    if clear_logs:
+        _delete_non_matching_logs(log_paths, matched_indices)
 
     if not matched_indices:
         logger.warning(

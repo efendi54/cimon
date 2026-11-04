@@ -23,6 +23,7 @@ from cimon.github_api import (
     print_quota,
     print_runner_status,
     render_runner_status_chart,
+    resolve_token,
 )
 from cimon.parquet_io import write_table_atomic
 from cimon.visualization import pipeline, registry
@@ -55,7 +56,9 @@ def main(log_level: str, log_file: Path | None) -> None:
     # right below) off stdout entirely in that case, still writing them to
     # --log-file as usual.
     json_quota_mode = "quota" in sys.argv and "--json" in sys.argv
-    handlers: list[logging.Handler] = [] if json_quota_mode else [logging.StreamHandler(sys.stdout)]
+    handlers: list[logging.Handler] = (
+        [] if json_quota_mode else [logging.StreamHandler(sys.stdout)]
+    )
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
@@ -93,15 +96,16 @@ def main(log_level: str, log_file: Path | None) -> None:
 )
 def quota(token: str | None, host: str | None, *, as_json: bool) -> None:
     """Show the GitHub API quota."""
-    if not token:
-        msg = (
-            "No token provided and no environment variable set. "
-            "Please set GH_TOKEN or GITHUB_TOKEN."
-        )
-        raise click.UsageError(msg)
-
     if not host:
         msg = "No host provided and no environment variable set. Please set GH_HOST."
+        raise click.UsageError(msg)
+
+    token = resolve_token(host, token)
+    if not token:
+        msg = (
+            "No ~/.netrc entry for the host and no token provided. "
+            "Please set GH_TOKEN or GITHUB_TOKEN."
+        )
         raise click.UsageError(msg)
 
     try:
@@ -161,15 +165,16 @@ def runners(
     cache_dir: Path,
 ) -> None:
     """Show self-hosted runner status: online/offline counts, and which online runners are busy."""
-    if not token:
-        msg = (
-            "No token provided and no environment variable set. "
-            "Please set GH_TOKEN or GITHUB_TOKEN."
-        )
-        raise click.UsageError(msg)
-
     if not host:
         msg = "No host provided and no environment variable set. Please set GH_HOST."
+        raise click.UsageError(msg)
+
+    token = resolve_token(host, token)
+    if not token:
+        msg = (
+            "No ~/.netrc entry for the host and no token provided. "
+            "Please set GH_TOKEN or GITHUB_TOKEN."
+        )
         raise click.UsageError(msg)
 
     if not org and not (owner and repo):
@@ -245,28 +250,31 @@ def build_metrics(input_arg: str, output_dir: Path) -> None:
     "matched any job).",
 )
 @click.option(
-    "--keep-logs",
+    "--clear-logs",
     is_flag=True,
-    help="Keep downloaded logs under OUTPUT_DIR/logs instead of a temporary directory, "
-    "so a later call over the same/overlapping input can skip logs it already downloaded.",
+    help="Only valid together with --pattern: once every job's log has been checked, delete "
+    "the logs of jobs whose log did NOT match --pattern, keeping only the matching ones on "
+    "disk. Without this flag (the default), every downloaded log is always kept, matched or "
+    "not.",
 )
 def download_logs(
-    input_arg: str, pattern: str | None, output_dir: Path, *, keep_logs: bool
+    input_arg: str, pattern: str | None, output_dir: Path, *, clear_logs: bool
 ) -> None:
     """Download each job's log from INPUT, optionally keeping only the ones matching PATTERN.
 
     INPUT is a workflow-job URL, a JSON file listing job URLs, or a Parquet
     file with a job_url column. Downloads every job's log into
-    OUTPUT_DIR/<run_id>/<job_id>.log (temporary by default, or
-    OUTPUT_DIR/logs if --keep-logs is given). If --pattern is given, each
-    log is also searched for it (a regular expression) and every matching
-    job is written to log-match.parquet in OUTPUT_DIR (keeping all original
-    columns for Parquet input); if nothing matched, no output file is
-    written and a warning is logged instead. Without --pattern, no output
-    file is produced -- logs are simply downloaded.
+    OUTPUT_DIR/logs/<run_id>/<job_id>.log -- always kept, so a later call
+    over the same/overlapping input can skip logs it already downloaded. If
+    --pattern is given, each log is also searched for it (a regular
+    expression) and every matching job is written to log-match.parquet in
+    OUTPUT_DIR (keeping all original columns for Parquet input); if nothing
+    matched, no output file is written and a warning is logged instead.
+    --clear-logs (only meaningful together with --pattern) deletes every
+    downloaded log that did NOT match again once the analysis is done.
     """
     try:
-        run_download_logs(input_arg, output_dir, pattern, keep_logs=keep_logs)
+        run_download_logs(input_arg, output_dir, pattern, clear_logs=clear_logs)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
 

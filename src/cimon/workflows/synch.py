@@ -34,6 +34,7 @@ from cimon.github_api import (
     api_get,
     create_session,
     load_etag_cache,
+    resolve_token,
     save_etag_cache,
 )
 from cimon.workflows.models import (
@@ -1174,19 +1175,19 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     args = parser.parse_args(argv)
 
-    token = args.token
-
-    if not args.token:
-        parser.error(
-            "No token provided and no environment variable set. Please set "
-            "GH_TOKEN or GITHUB_TOKEN.",
-        )
-
     host = args.host
 
     if not host:
         parser.error(
             "No host provided and no environment variable set. Please set GH_HOST.",
+        )
+
+    token = resolve_token(host, args.token)
+
+    if not token:
+        parser.error(
+            "No ~/.netrc entry for the host and no token provided. Please set "
+            "GH_TOKEN or GITHUB_TOKEN.",
         )
 
     base_url = f"https://{host}/api/v3"

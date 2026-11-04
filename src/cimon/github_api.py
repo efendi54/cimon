@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import logging
 import time
@@ -72,6 +73,32 @@ def save_etag_cache(path: str, cache: dict[str, dict[str, Any]]) -> None:
     cache_path = Path(path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(cache), encoding="utf-8")
+
+
+def netrc_token(host: str) -> str | None:
+    """Return the password of `host`'s ~/.netrc (or $NETRC) entry, if any."""
+    auth = requests.utils.get_netrc_auth(f"https://{host}/")
+    return auth[1] if auth and auth[1] else None
+
+
+@functools.cache
+def _log_credential_source(host: str, *, from_netrc: bool, has_env_token: bool) -> None:
+    if from_netrc:
+        overrides = " (overrides GH_TOKEN/GITHUB_TOKEN)" if has_env_token else ""
+        logger.info(f"Credentials for {host}: from .netrc{overrides}")
+    elif has_env_token:
+        logger.info(
+            f"Credentials for {host}: from GH_TOKEN/GITHUB_TOKEN (no matching .netrc entry)"
+        )
+
+
+def resolve_token(host: str, env_token: str | None) -> str | None:
+    """Return the `.netrc` password for `host` if present, else `env_token`; logs which one."""
+    token = netrc_token(host)
+    _log_credential_source(
+        host, from_netrc=token is not None, has_env_token=bool(env_token)
+    )
+    return token or env_token
 
 
 def create_session(token: str, *, quota_limit: int | None = None) -> requests.Session:

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
 from cimon.workflows import build_metrics, download_logs
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ def test_run_without_pattern_only_downloads(
     _write_sample(input_path)
 
     output_dir = tmp_path / "out"
-    output_path = download_logs.run(str(input_path), output_dir, keep_logs=True)
+    output_path = download_logs.run(str(input_path), output_dir)
 
     assert output_path is None
     assert not (output_dir / download_logs.LOG_MATCH_PARQUET_FILE_NAME).exists()
@@ -123,7 +124,7 @@ def test_run_accepts_json_array_of_urls(
             [
                 "https://github.com/acme/app/actions/runs/100/job/1",
                 "https://github.com/acme/app/actions/runs/100/job/2",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -205,11 +206,11 @@ def test_download_log_skips_already_downloaded_log(
     assert calls == ["1"]
 
 
-def test_run_removes_logs_dir_by_default(
+def test_run_keeps_logs_by_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without --keep-logs, the downloaded logs don't survive the run."""
+    """Logs are always kept under output_dir/logs, even without --pattern/--clear-logs."""
     seen_logs_dirs: list[Path] = []
 
     def _tracking_download(
@@ -228,17 +229,97 @@ def test_run_removes_logs_dir_by_default(
     input_path = tmp_path / "jobs.parquet"
     _write_sample(input_path)
 
-    download_logs.run(str(input_path), tmp_path / "out", "ERROR:")
+    download_logs.run(str(input_path), tmp_path / "out")
 
-    assert not (tmp_path / "out" / download_logs.LOGS_DIR_NAME).exists()
-    assert not seen_logs_dirs[0].exists()
+    logs_dir = tmp_path / "out" / download_logs.LOGS_DIR_NAME
+    assert logs_dir.exists()
+    assert seen_logs_dirs[0].exists()
+    assert sorted(str(p.relative_to(logs_dir)) for p in logs_dir.rglob("*.log")) == [
+        "100/1.log",
+        "100/2.log",
+        "101/3.log",
+    ]
+
+
+def test_run_keeps_all_logs_with_pattern_but_without_clear_logs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Logs of non-matching jobs are kept too, as long as --clear-logs isn't given."""
+    monkeypatch.setattr(build_metrics, "ensure_github_auth", lambda _host: None)
+    monkeypatch.setattr(build_metrics, "download_job_log", _fake_download_job_log)
+
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    output_dir = tmp_path / "out"
+    download_logs.run(str(input_path), output_dir, "ERROR:")
+
+    logs_dir = output_dir / download_logs.LOGS_DIR_NAME
+    assert sorted(str(p.relative_to(logs_dir)) for p in logs_dir.rglob("*.log")) == [
+        "100/1.log",
+        "100/2.log",
+        "101/3.log",
+    ]
+
+
+def test_run_with_clear_logs_deletes_only_non_matching_logs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--clear-logs deletes the logs of jobs whose log didn't match, keeps the matching ones."""
+    monkeypatch.setattr(build_metrics, "ensure_github_auth", lambda _host: None)
+    monkeypatch.setattr(build_metrics, "download_job_log", _fake_download_job_log)
+
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    output_dir = tmp_path / "out"
+    download_logs.run(str(input_path), output_dir, "ERROR:", clear_logs=True)
+
+    logs_dir = output_dir / download_logs.LOGS_DIR_NAME
+    # Job 1 ("everything fine") didn't match "ERROR:" and must be deleted;
+    # its run directory "100/" stays around since job 2 (which did match)
+    # also lives there. Jobs 2 and 3 matched and must survive.
+    assert not (logs_dir / "100" / "1.log").exists()
+    assert (logs_dir / "100" / "2.log").exists()
+    assert (logs_dir / "101" / "3.log").exists()
+
+
+def test_clear_logs_without_pattern_is_rejected(tmp_path: Path) -> None:
+    """--clear-logs only makes sense together with --pattern."""
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    with pytest.raises(ValueError, match="clear_logs"):
+        download_logs.run(str(input_path), tmp_path / "out", clear_logs=True)
+
+
+def test_run_logs_the_download_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The directory logs are downloaded into is always logged, so it's visible on the CLI."""
+    monkeypatch.setattr(build_metrics, "ensure_github_auth", lambda _host: None)
+    monkeypatch.setattr(build_metrics, "download_job_log", _fake_download_job_log)
+
+    input_path = tmp_path / "jobs.parquet"
+    _write_sample(input_path)
+
+    output_dir = tmp_path / "out"
+    with caplog.at_level("INFO"):
+        download_logs.run(str(input_path), output_dir)
+
+    logs_dir = output_dir / download_logs.LOGS_DIR_NAME
+    assert f"Downloading logs into {logs_dir}" in caplog.text
 
 
 def test_run_keeps_logs_and_skips_redownload_across_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With keep_logs=True, logs persist under output_dir/logs/<run_id>/<job_id>.log and are reused."""
+    """Logs persist under output_dir/logs/<run_id>/<job_id>.log and are reused across runs."""
     calls: list[str] = []
 
     def _tracking_download(
@@ -260,7 +341,7 @@ def test_run_keeps_logs_and_skips_redownload_across_runs(
     _write_sample(input_path)
 
     output_dir = tmp_path / "out"
-    download_logs.run(str(input_path), output_dir, "ERROR:", keep_logs=True)
+    download_logs.run(str(input_path), output_dir, "ERROR:")
 
     logs_dir = output_dir / download_logs.LOGS_DIR_NAME
     assert logs_dir.exists()
@@ -271,7 +352,7 @@ def test_run_keeps_logs_and_skips_redownload_across_runs(
     ]
 
     calls.clear()
-    download_logs.run(str(input_path), output_dir, "ERROR:", keep_logs=True)
+    download_logs.run(str(input_path), output_dir, "ERROR:")
 
     assert calls == []
 
@@ -370,7 +451,7 @@ def test_run_skips_github_auth_for_already_cached_logs(
     _write_sample(input_path)
 
     output_dir = tmp_path / "out"
-    download_logs.run(str(input_path), output_dir, keep_logs=True)
+    download_logs.run(str(input_path), output_dir)
 
     assert sorted(auth_calls) == ["github.com", "github.com", "github.com"]
     assert sorted(download_calls) == ["1", "2", "3"]
@@ -379,7 +460,7 @@ def test_run_skips_github_auth_for_already_cached_logs(
     download_calls.clear()
 
     # Second run over the same (now cached) logs must not touch GitHub at all.
-    download_logs.run(str(input_path), output_dir, keep_logs=True)
+    download_logs.run(str(input_path), output_dir)
 
     assert auth_calls == []
     assert download_calls == []

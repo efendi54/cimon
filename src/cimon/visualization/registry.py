@@ -9,17 +9,20 @@ result out as its own Parquet file, and then calls `render` -- so the
 filtered subset stays inspectable/reusable independently of the render step.
 
 Add a new visualization by adding a spec file under `specs/` and calling
-`register()` with it below.
+`register()` with it below. A visualization that depends on parameters
+(`cimon visualize <name> -p KEY=VALUE`) has no spec file: it passes a
+`spec_builder` that builds the filter spec in code, plus its accepted `params`
+(see `Visualization`).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import pyarrow as pa
 
@@ -28,12 +31,21 @@ SPECS_DIR = Path(__file__).parent / "specs"
 
 @dataclass(frozen=True)
 class Visualization:
-    """A named filter spec paired with the function that renders its result."""
+    """A named filter spec paired with the function that renders its result.
+
+    Most visualizations use a static `spec_path` and a `render(table, output_dir)` callback. A *parametrized*
+    visualization (e.g. one specific workflow run) declares its accepted `params` (name -> help text, passed via
+    `cimon visualize -p NAME=VALUE`), builds its filter spec from them with `spec_builder(params)`, and its `render`
+    is called as `render(table, output_dir, params)`. `spec_builder`/`render` raise `ValueError` for bad parameters
+    or unusable data.
+    """
 
     name: str
-    spec_path: Path
-    render: Callable[[pa.Table, Path], None]
+    spec_path: Path | None
+    render: Callable[..., None]
     columns: tuple[str, ...] | None = None
+    spec_builder: Callable[[Mapping[str, str]], Mapping[str, Any]] | None = None
+    params: Mapping[str, str] = field(default_factory=dict)
 
 
 _REGISTRY: dict[str, Visualization] = {}
@@ -86,6 +98,18 @@ def _render_runner_status_trend(table: pa.Table, output_dir: Path) -> None:
     render(table, output_dir)
 
 
+def _workflow_job_durations_spec(params: Mapping[str, str]) -> Mapping[str, Any]:
+    from cimon.visualization.renderers.run_timeline import spec_for_run  # noqa: PLC0415
+
+    return spec_for_run(params)
+
+
+def _render_workflow_job_durations(table: pa.Table, output_dir: Path, params: Mapping[str, str]) -> None:
+    from cimon.visualization.renderers.run_timeline import render_run  # noqa: PLC0415
+
+    render_run(table, output_dir, params)
+
+
 register(
     Visualization(
         name="job-durations",
@@ -107,5 +131,19 @@ register(
         name="runner-status-trend",
         spec_path=SPECS_DIR / "runner_status_trend.yml",
         render=_render_runner_status_trend,
+    ),
+)
+
+register(
+    Visualization(
+        name="workflow-job-durations",
+        spec_path=None,
+        spec_builder=_workflow_job_durations_spec,
+        render=_render_workflow_job_durations,
+        params={
+            "run-url": "(required) workflow run URL, optionally with /attempts/<n> (default: latest cached attempt)",
+            "tz": "time zone for plotting (default: Europe/Berlin)",
+            "gap": "tolerance in seconds when chaining jobs on the critical path (default: 120)",
+        },
     ),
 )

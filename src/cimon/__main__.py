@@ -440,6 +440,18 @@ def query(
     logger.info(f"Wrote {table.num_rows} filtered row(s) to {output_path}")
 
 
+def _parse_params(raw_params: tuple[str, ...]) -> dict[str, str]:
+    """Turn repeated `KEY=VALUE` options into a dict."""
+    params: dict[str, str] = {}
+    for raw in raw_params:
+        key, separator, value = raw.partition("=")
+        if not separator or not key:
+            msg = f"Invalid parameter {raw!r}, expected KEY=VALUE."
+            raise click.BadParameter(msg, param_hint="-p / --param")
+        params[key] = value
+    return params
+
+
 @main.command("visualize")
 @click.argument("names", nargs=-1)
 @click.option(
@@ -447,7 +459,7 @@ def query(
     "--input",
     "input_path",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
-    help="Path to the workflows Parquet cache to filter.",
+    help="Path to the workflows Parquet cache to filter. Defaults to the cache of `cimon sync` (~/.cache/cimon).",
 )
 @click.option(
     "-o",
@@ -458,16 +470,25 @@ def query(
     help="""Directory to write the filtered Parquet file (and any rendered output) into.""",
 )
 @click.option(
+    "-p",
+    "--param",
+    "raw_params",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Parameter for a parametrized visualization, e.g. -p run-url=<URL>. Can be given multiple times.",
+)
+@click.option(
     "-l",
     "--list",
     "list_only",
     is_flag=True,
-    help="List the registered visualization names and exit.",
+    help="List the registered visualization names (and their parameters) and exit.",
 )
 def visualize(
     names: tuple[str, ...],
     input_path: Path | None,
     output_dir: Path,
+    raw_params: tuple[str, ...],
     *,
     list_only: bool,
 ) -> None:
@@ -476,25 +497,37 @@ def visualize(
     NAMES can be given more than once (e.g. `cimon visualize job-durations
     merge-group-failures`) to run several visualizations in one call.
 
+    Parametrized visualizations take their parameters via -p, e.g. `cimon visualize workflow-job-durations
+    -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>`.
+
     See cimon.visualization.registry for the list of registered visualizations
     and how to add new ones.
     """
     if list_only:
-        click.echo("\n".join(registry.available()))
+        for name in registry.available():
+            params = registry.get(name).params
+            click.echo(name)
+            for param, description in params.items():
+                click.echo(f"    -p {param}=...  {description}")
         return
 
     if not names:
         msg = "Missing argument 'NAMES'. Use --list to see available visualizations."
         raise click.UsageError(msg)
-    if not input_path:
-        msg = "Missing option '-i' / '--input'."
-        raise click.UsageError(msg)
+
+    params = _parse_params(raw_params)
+    input_path = input_path or Path.home() / ".cache/cimon" / synch.WORKFLOWS_PARQUET_FILE_NAME
+    if not input_path.exists():
+        msg = f"No cache found at {input_path}. Run `cimon sync` first or pass -i / --input."
+        raise click.ClickException(msg)
 
     try:
         for name in names:
-            pipeline.run(name, input_path, output_dir)
+            pipeline.run(name, input_path, output_dir, params)
     except KeyError as exc:
         raise click.UsageError(str(exc)) from None
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
 
 
 if __name__ == "__main__":

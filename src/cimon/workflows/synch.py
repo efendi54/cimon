@@ -93,6 +93,7 @@ PARQUET_SCHEMA = pa.schema(
         ("job_name", pa.string()),
         ("job_url", pa.string()),
         ("job_run_attempt", pa.int64()),
+        ("job_created_at", pa.string()),
         ("job_started_at", pa.string()),
         ("job_completed_at", pa.string()),
         ("job_duration_sec", pa.int64()),
@@ -533,6 +534,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_name": None,
                     "job_url": None,
                     "job_run_attempt": None,
+                    "job_created_at": None,
                     "job_started_at": None,
                     "job_completed_at": None,
                     "job_duration_sec": None,
@@ -565,6 +567,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_name": job.name,
                     "job_url": job.html_url,
                     "job_run_attempt": job.run_attempt,
+                    "job_created_at": job.created_at,
                     "job_started_at": job.started_at,
                     "job_completed_at": job.completed_at,
                     "job_duration_sec": job.duration_sec,
@@ -746,6 +749,7 @@ def cached_data_from_parquet(
                 name=row.get("job_name"),
                 html_url=row.get("job_url"),
                 run_attempt=row.get("job_run_attempt"),
+                created_at=row.get("job_created_at"),
                 started_at=row.get("job_started_at"),
                 completed_at=row.get("job_completed_at"),
                 # Recomputed rather than trusting row["job_duration_sec"], so
@@ -957,6 +961,7 @@ def create_job_cache_entry(job: dict[str, Any]) -> JobEntry:
             name=job["name"],
             html_url=job["html_url"],
             run_attempt=job.get("run_attempt"),
+            created_at=job.get("created_at"),
             started_at=job.get("started_at"),
             completed_at=job.get("completed_at"),
             duration_sec=calculate_job_duration_in_seconds(job),
@@ -1486,6 +1491,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         jobs_are_terminal = cached_jobs is not None and all(
             entry.job.completed_at is not None for entry in cached_jobs
         )
+        # Rows cached before job_created_at existed get their jobs refetched
+        # once (only while the run is inside the synced date range) to backfill it.
+        jobs_have_created_at = cached_jobs is not None and all(
+            entry.job.created_at is not None for entry in cached_jobs
+        )
         current_attempt_is_cached = cached_attempt_has_job_snapshot(
             cached.run_attempt,
             cached_attempts_by_run.get(run_id, []),
@@ -1495,6 +1505,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         if (
             run["status"] == "completed"
             and jobs_are_terminal
+            and jobs_have_created_at
             and current_attempt_is_cached
         ):
             cached.jobs = cached_jobs

@@ -13,6 +13,7 @@ class JobInfo(BaseModel):
     name: str
     html_url: str
     run_attempt: int | None = None
+    created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     duration_sec: int | None = None

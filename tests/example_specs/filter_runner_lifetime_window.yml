@@ -1,0 +1,7 @@
+all:
+  - column: job_runner_name
+    op: starts_with
+    value: "vmss-cas-runner-app-adas-src"
+  - column: job_started_at
+    op: between
+    value: ["2026-10-13T00:00:00Z", "2026-10-20T23:59:59Z"]

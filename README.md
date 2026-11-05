@@ -421,9 +421,13 @@ cache down to the rows one visualization cares about, the filtered rows are
 persisted as their own Parquet file, and a registered **render** function
 turns that Parquet data into an actual chart.
 
+The spec is normally a static YAML file. Visualizations that depend on a parameter (e.g. one specific workflow run,
+see [Analyzing one workflow run](#analyzing-one-workflow-run)) have **no spec file**: they build the same kind of
+filter spec in code at runtime from the `-p KEY=VALUE` parameters.
+
 ```mermaid
 flowchart LR
-    A[("workflows.parquet<br>(full cache)")] --> B["filter spec (YAML)"]
+    A[("workflows.parquet<br>(full cache)")] --> B["filter spec (YAML,<br>or built from -p parameters)"]
     B --> C[("filtered subset<br>out/visualizations/&lt;name&gt;.parquet")]
     C --> D["render(table, output_dir)"]
     D --> E["chart(s)<br>*.html"]
@@ -452,11 +456,14 @@ Currently registered:
 | Name | Spec | What it shows |
 |---|---|---|
 | `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed (successful) or still-running jobs -- one HTML page per workflow |
+| `workflow-job-durations` | none (spec built in code from `-p run-url=...`) | timeline, runner wait, contribution per stage and critical path of one workflow run, see [Analyzing one workflow run](#analyzing-one-workflow-run) |
 
 ### Adding a new visualization
 
 A visualization is three small pieces: a filter spec, a render function, and
-one line registering them together. As an example, here's a simplified
+one line registering them together. (If it depends on parameters, the "spec" is
+a `spec_builder` function instead of a YAML file, see
+[Analyzing one workflow run](#analyzing-one-workflow-run).) As an example, here's a simplified
 version of how `job-durations` is built.
 
 ```mermaid
@@ -535,3 +542,42 @@ uv run --extra viz cimon visualize job-durations -i workflows.parquet -o out/vis
 ```
 
 now filters the cache and writes one duration chart per workflow file.
+
+### Analyzing one workflow run
+
+The parametrized visualization `workflow-job-durations` answers "where does the runtime of *this* run go?" for a
+single workflow run. It takes a workflow-run URL (as copied from the browser) via `-p run-url=...`, reads that run
+from the cache (default `~/.cache/cimon/workflows.parquet`, or `-i`) and writes one HTML page:
+
+```bash
+uv run cimon visualize workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>
+# a specific attempt:
+uv run cimon visualize workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>/attempts/2
+```
+
+The run has to be in the cache (see `cimon sync`); without `/attempts/<n>` the latest cached attempt is used.
+This visualization has **no spec file**: the filter spec (host, owner, repo, run id and, if given, attempt, taken from
+the URL) is built in code by `spec_for_run` in the renderer module. The filtered rows of the run are written to
+`out/visualizations/workflow-job-durations.parquet` (overwritten per call), the page to
+`out/visualizations/run-<run_id>-attempt-<n>.html`. It contains
+
+1. a **timeline**: one row per stage (first ` / `-separated part of the job name), one bar per job phase: orange while
+   the job **waits for a runner** (`job_created_at` -> `job_started_at`), then coloured by status while it runs. Jobs
+   that are still running or queued end at the cache snapshot (dashed line). Click a bar to open the job;
+2. the **contribution per stage**: wall-clock time with at least one job waiting for a runner / running, and the
+   summed running time (effort) -- stages run in parallel, so the shares add up to more than 100 %;
+3. a **critical path** (heuristic): from the job that ended last, step back to the job that ended right before it
+   was created, including each job's runner wait. The real `needs:` dependencies are not part of the cache. A long
+   orange part on the path means the run was delayed by runner availability rather than by job runtime.
+
+Waiting times need `job_created_at` in the cache. Runs cached before that column existed show no waiting time until
+`cimon sync` refetches them (it does so once, for runs inside the synced `--from-date`/`--to-date` range).
+
+The same tables are logged on the console. Skipped jobs are left out. Further parameters: `-p tz=<zone>` (default
+`Europe/Berlin`) and `-p gap=<seconds>` (tolerance for the critical path, default 120). The renderer lives in
+[`cimon.visualization.renderers.run_timeline`](src/cimon/visualization/renderers/run_timeline.py).
+
+Parametrized visualizations are registered like the others, but instead of a static `spec_path` (YAML file) they
+provide a `spec_builder(params)` that builds the filter spec in code from the `-p` parameters, declare their accepted
+`params`, and their `render` receives the parameters as a third argument (see
+`cimon.visualization.registry.Visualization`). `cimon visualize --list` shows the parameters.

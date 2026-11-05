@@ -51,6 +51,14 @@ the time elapsed between `job_started_at` and that sync's own
 `cache_updated_at` -- not "now", so it stays accurate even if read long after
 a stale cache's last sync.
 
+`job_created_at` is when GitHub created/queued the job, `job_started_at` when
+a runner picked it up; the difference is the time the job **waited for a
+runner** (neither counted in `job_duration_sec` nor in
+`job_active_duration_sec`). While a job is still `queued`, GitHub reports
+`job_started_at == job_created_at`. Rows cached before `job_created_at`
+existed have `NULL` there; `cimon sync` refetches the jobs of such runs once
+(as long as they are inside the synced date range) to backfill it.
+
 A filter on `job_status`/`job_runner_labels` therefore matches individual job
 rows, not automatically every other job of the same run -- a run can well be
 `in_progress` overall while the specific job row you're looking at already

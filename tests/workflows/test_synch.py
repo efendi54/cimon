@@ -11,8 +11,11 @@ from cimon.workflows.synch import (
     cache_to_parquet_rows,
     cached_attempt_has_job_snapshot,
     cached_data_from_parquet,
+    create_job_cache_entry,
     create_run_cache_entry,
     fetch_run_attempt_info,
+    load_parquet,
+    save_parquet,
 )
 
 
@@ -145,3 +148,49 @@ def test_new_attempt_requires_fresh_job_snapshot() -> None:
 
     assert cached_attempt_has_job_snapshot(1, attempts, jobs)
     assert not cached_attempt_has_job_snapshot(2, attempts, jobs)
+
+
+def test_job_created_at_survives_api_to_parquet_and_back() -> None:
+    job_entry = create_job_cache_entry(
+        {
+            "id": 1,
+            "name": "build",
+            "html_url": "https://example.test/jobs/1",
+            "run_attempt": 1,
+            "created_at": "2026-11-04T19:04:36Z",
+            "started_at": "2026-11-04T23:04:55Z",
+            "completed_at": "2026-11-05T06:59:40Z",
+            "status": "completed",
+            "conclusion": "success",
+        },
+    )
+    run = RunEntry(
+        run_id=1,
+        run_number=1,
+        run_attempt=1,
+        workflow_run_url="https://example.test/actions/runs/1/attempts/1",
+        event="schedule",
+        head_branch="main",
+        workflow_status="completed",
+        workflow_conclusion="success",
+        created_at="2026-11-04T19:01:04Z",
+        cache_updated_at="2026-11-05T09:00:00+00:00",
+        jobs=[job_entry],
+    )
+
+    [row] = cache_to_parquet_rows(WorkflowCache(runs=[run]))
+    _, jobs_by_run, _ = cached_data_from_parquet([row])
+
+    assert row["job_created_at"] == "2026-11-04T19:04:36Z"
+    assert jobs_by_run["1"][0].job.created_at == "2026-11-04T19:04:36Z"
+
+
+def test_legacy_rows_without_job_created_at_are_saved_with_null(tmp_path) -> None:
+    path = tmp_path / "workflows.parquet"
+    legacy_row = {"run_id": "1", "job_id": "1", "job_name": "build", "job_started_at": "2026-11-04T23:04:55Z"}
+
+    save_parquet(str(path), [legacy_row])
+    [row] = load_parquet(str(path))
+
+    assert row["job_created_at"] is None
+    assert row["job_started_at"] == "2026-11-04T23:04:55Z"

@@ -75,6 +75,17 @@ last sync request, not the cumulative cache) and `etag_cache.json`.
 uv run cimon sync --workflow pr.yml --from-date 2026-08-01 --to-date 2026-08-31 --cache-dir .
 ```
 
+Repeat `--workflow` to sync several workflow files in one invocation:
+
+```bash
+uv run cimon sync --workflow pr.yml --workflow cas_nightly_and_release.yml
+```
+
+Workflows are processed sequentially and merged into the same Parquet cache.
+They share the API session, quota limit and ETag cache. `response.json` remains
+a snapshot of the last processed workflow, not a combined response. If the quota
+limit is reached, fetched data is saved and remaining workflows are not processed.
+
 ```bash
 Fetching workflow runs ... done (303 runs found)
 Workflow runs requiring job update: 12
@@ -456,7 +467,7 @@ Currently registered:
 | Name | Spec | What it shows |
 |---|---|---|
 | `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed (successful) or still-running jobs -- one HTML page per workflow |
-| `workflow-job-durations` | none (spec built in code from `-p run-url=...`) | timeline, runner wait, contribution per stage and critical path of one workflow run, see [Analyzing one workflow run](#analyzing-one-workflow-run) |
+| `workflow-job-durations` | none (spec built from `run-url` or `run-urls-file`) | single-run timeline and contribution, or average job phases across selected runs, see [Analyzing one workflow run](#analyzing-one-workflow-run) |
 
 ### Adding a new visualization
 
@@ -576,6 +587,66 @@ Waiting times need `job_created_at` in the cache. Runs cached before that column
 The same tables are logged on the console. Skipped jobs are left out. Further parameters: `-p tz=<zone>` (default
 `Europe/Berlin`) and `-p gap=<seconds>` (tolerance for the critical path, default 120). The renderer lives in
 [`cimon.visualization.renderers.run_timeline`](src/cimon/visualization/renderers/run_timeline.py).
+
+#### Average job phases across selected runs
+
+Pass `-p run-urls-file=<selection.parquet>` **instead of** `-p run-url=...` to analyze several
+runs. This file supplies both the `workflow_run_url` values and the complete job data
+used for plotting. No default cache is accessed and no additional `-i` is needed
+(combining it with `run-urls-file` is rejected). A URL-only file is insufficient.
+For example, use `cimon query` to select a date range into a Parquet file first,
+keeping all job columns rather than restricting the output to URLs.
+
+```bash
+# Average pages only, directly from the supplied job data:
+uv run cimon visualize workflow-job-durations \
+  -p run-urls-file=selected-runs.parquet \
+  -p individual-html=false \
+  -o out/averages
+
+# Average pages plus the existing per-run pages (the default):
+uv run cimon visualize workflow-job-durations \
+  -p run-urls-file=selected-runs.parquet \
+  -o out/averages
+```
+
+Each workflow gets one shared output directory:
+
+```text
+<workflow-file>-<identity-hash>/
+  averages.html
+  runs/
+    run-123-attempt-1.html
+    run-456-attempt-1.html
+```
+
+The identity hash is the first 12 SHA-256 characters of `host/owner/repo/workflow_file`.
+The averages and their corresponding individual runs are therefore always grouped together.
+Bars show average **runner waiting time** (job created -> started) and **execution time**
+(started -> completed), grouped by the **full job name and outcome**. Successful, failed
+and cancelled executions are not mixed. A diamond marks the mean total (created -> completed).
+Hover for the median and valid sample count of each metric. One job execution in a selected
+run attempt is one observation; this is not a stage wall-clock or critical-path average.
+
+Only completed, non-skipped jobs count towards statistics. Missing or invalid timestamps
+are excluded per metric, never replaced with zero. Thus a job lacking `job_created_at` may
+still contribute execution time but not waiting/total time. Phase means use their own
+valid samples, whereas the total uses paired samples, so the stacked phase means may
+differ from the total marker. Duration arithmetic uses UTC to avoid daylight-saving
+distortions. Running/queued jobs remain visible in optional individual pages only.
+If no valid completed-job measurements exist, the command reports an error.
+
+Duplicate run references are removed. A URL with `/attempts/<n>` selects that attempt;
+otherwise the latest cached attempt is selected. Overlapping base/attempt references
+do not count the same attempt twice. Mixed workflows/repositories get separate summaries.
+URLs that do not match the job data are reported before HTML generation; malformed,
+empty or missing files, missing required job columns and invalid `individual-html`
+values also fail explicitly.
+
+Optional individual pages use the existing renderer and are saved under the same workflow
+directory in `runs/run-<id>-attempt-<n>.html`, preventing collisions across workflows/repositories.
+`individual-html=false` does not generate these pages and does not remove old output files.
+The existing intermediate `workflow-job-durations.parquet` remains inspectable.
 
 Parametrized visualizations are registered like the others, but instead of a static `spec_path` (YAML file) they
 provide a `spec_builder(params)` that builds the filter spec in code from the `-p` parameters, declare their accepted

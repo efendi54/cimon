@@ -141,7 +141,9 @@ register(
         spec_builder=_workflow_job_durations_spec,
         render=_render_workflow_job_durations,
         params={
-            "run-url": "(required) workflow run URL, optionally with /attempts/<n> (default: latest cached attempt)",
+            "run-url": "workflow run URL, alternatively use run-urls-file (default: latest cached attempt)",
+            "run-urls-file": "Parquet job data including workflow_run_url; alternative to run-url, no -i needed",
+            "individual-html": "write per-run pages for Parquet selection: true (default) or false",
             "tz": "time zone for plotting (default: Europe/Berlin)",
             "gap": "tolerance in seconds when chaining jobs on the critical path (default: 120)",
         },

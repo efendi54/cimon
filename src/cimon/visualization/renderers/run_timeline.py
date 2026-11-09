@@ -312,10 +312,20 @@ def render(
 
 
 def spec_for_run(params: Mapping[str, str]) -> dict[str, Any]:
-    """Filter spec selecting the rows of the run (and optionally attempt) in the `run-url` parameter."""
+    """Select a run URL or the run references from a Parquet selection."""
+    if params.get("run-urls-file"):
+        from cimon.visualization.renderers.run_averages import selection_urls  # noqa: PLC0415
+
+        if params.get("run-url"):
+            msg = "Use either 'run-url' or 'run-urls-file', not both."
+            raise ValueError(msg)
+        return {"any": [spec_for_run({"run-url": url}) for url in selection_urls(params)]}
+    if "individual-html" in params:
+        msg = "Parameter 'individual-html' requires 'run-urls-file'."
+        raise ValueError(msg)
     url = params.get("run-url")
     if not url:
-        msg = "Missing parameter 'run-url', e.g. -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>"
+        msg = "Missing parameter 'run-url' or 'run-urls-file', e.g. -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>"
         raise ValueError(msg)
     ref = parse_workflow_run_url(url)
     conditions = [
@@ -330,12 +340,18 @@ def spec_for_run(params: Mapping[str, str]) -> dict[str, Any]:
 
 
 def render_run(table: pa.Table, output_dir: Path, params: Mapping[str, str]) -> None:
-    """Render the latest attempt in `table` (one run, see `spec_for_run`), honouring the `tz` and `gap` parameters."""
+    """Render a single attempt or batch averages, honouring the `tz` and `gap` parameters."""
     try:
         gap_seconds = int(params.get("gap", DEFAULT_GAP_SECONDS))
     except ValueError:
         msg = f"Parameter 'gap' must be an integer number of seconds, got {params['gap']!r}"
         raise ValueError(msg) from None
+
+    if params.get("run-urls-file"):
+        from cimon.visualization.renderers.run_averages import render_selection  # noqa: PLC0415
+
+        render_selection(table, output_dir, params, gap_seconds)
+        return
 
     attempt = pc.max(table.column("run_attempt")).as_py()
     attempt_table = table.filter(pc.equal(table.column("run_attempt"), attempt))

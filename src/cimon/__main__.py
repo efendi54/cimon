@@ -459,7 +459,8 @@ def _parse_params(raw_params: tuple[str, ...]) -> dict[str, str]:
     "--input",
     "input_path",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
-    help="Path to the workflows Parquet cache to filter. Defaults to the cache of `cimon sync` (~/.cache/cimon).",
+    help="Path to the workflows Parquet cache to filter. Defaults to ~/.cache/cimon. "
+    "Not used with workflow-job-durations -p run-urls-file (that file supplies the job data).",
 )
 @click.option(
     "-o",
@@ -516,11 +517,6 @@ def visualize(
         raise click.UsageError(msg)
 
     params = _parse_params(raw_params)
-    input_path = input_path or Path.home() / ".cache/cimon" / synch.WORKFLOWS_PARQUET_FILE_NAME
-    if not input_path.exists():
-        msg = f"No cache found at {input_path}. Run `cimon sync` first or pass -i / --input."
-        raise click.ClickException(msg)
-
     try:
         for name in names:
             pipeline.run(name, input_path, output_dir, params)

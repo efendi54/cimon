@@ -11,6 +11,7 @@ the full cache.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
@@ -21,12 +22,11 @@ from cimon.workflows.query import WorkflowQuery
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def run(name: str, input_path: Path, output_dir: Path, params: Mapping[str, str] | None = None) -> None:
+def run(name: str, input_path: Path | None, output_dir: Path, params: Mapping[str, str] | None = None) -> None:
     """Filter `input_path` per the visualization `name`'s spec, then render it.
 
     The filtered rows are written to `output_dir/{name}.parquet` before
@@ -34,7 +34,8 @@ def run(name: str, input_path: Path, output_dir: Path, params: Mapping[str, str]
 
     `params` are only accepted by parametrized visualizations (see `Visualization`); they build the filter spec and
     are handed to `render` as a third argument. Raises `ValueError` for unknown/invalid parameters or if nothing
-    matches.
+    matches. For workflow-job-durations, run-urls-file supplies the full job data
+    and cannot be combined with input_path. Otherwise None uses the default cache.
     """
     visualization = get(name)
     params = dict(params or {})
@@ -44,9 +45,23 @@ def run(name: str, input_path: Path, output_dir: Path, params: Mapping[str, str]
         msg = f"Visualization {name!r} does not accept parameter(s) {', '.join(unknown)}. Accepted: {accepted}."
         raise ValueError(msg)
 
+    if name == "workflow-job-durations" and params.get("run-urls-file"):
+        if input_path is not None:
+            msg = "'run-urls-file' supplies the job data directly; do not pass -i / --input."
+            raise ValueError(msg)
+        input_path = Path(params["run-urls-file"])
+    else:
+        input_path = input_path or Path.home() / ".cache/cimon/workflows.parquet"
+        if not input_path.is_file():
+            msg = f"No cache found at {input_path}. Run `cimon sync` first or pass -i / --input."
+            raise ValueError(msg)
+
     if visualization.spec_builder:
         spec = visualization.spec_builder(params)
     else:
+        if visualization.spec_path is None:
+            msg = f"Visualization {name!r} has no filter spec."
+            raise ValueError(msg)
         spec = yaml.safe_load(visualization.spec_path.read_text(encoding="utf-8"))
 
     query = WorkflowQuery(input_path).filter_spec(spec)

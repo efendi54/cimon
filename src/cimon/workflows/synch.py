@@ -1082,7 +1082,7 @@ def parse_date_boundary(value: str) -> str:
     return value
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
+def main(argv: list[str] | None = None) -> None:
     """Run the command-line metrics collector."""
     parser = argparse.ArgumentParser(
         description="Update a GitHub Actions workflow-run cache.",
@@ -1123,7 +1123,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     parser.add_argument(
         "--workflow",
-        help="Workflow filename (e.g. pr.yml)",
+        action="append",
+        help="Workflow filename (e.g. pr.yml). Repeat to sync multiple workflows.",
     )
 
     parser.add_argument(
@@ -1180,6 +1181,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     args = parser.parse_args(argv)
 
+    if not args.workflow:
+        parser.error("No workflow specified. Provide at least one --workflow.")
+
     host = args.host
 
     if not host:
@@ -1230,8 +1234,6 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     cache_dir = Path(args.cache_dir).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
-    response_file = str(cache_dir / RESPONSE_JSON_FILE_NAME)
     etag_cache_file = str(cache_dir / ETAG_CACHE_FILE_NAME)
 
     # Entries only get carried over to the next run if they are actually
@@ -1242,9 +1244,25 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     etag_cache: dict[str, dict[str, Any]] = {}
     etag_cache_view = ChainMap(etag_cache, persisted_etag_cache)
 
-    # ------------------------------------------------------------------
-    # Workflow information
-    # ------------------------------------------------------------------
+    for workflow_name in args.workflow:
+        sync_workflow(args, parser, session, workflow_name, cache_dir, etag_cache_view)
+
+
+def sync_workflow(  # noqa: C901, PLR0912, PLR0915
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    session: requests.Session,
+    workflow_name: str,
+    cache_dir: Path,
+    etag_cache_view: ChainMap[str, dict[str, Any]],
+) -> None:
+    """Sync one workflow, merging into the shared cache before returning."""
+    host = args.host
+    base_url = f"https://{host}/api/v3"
+    parquet_file = cache_dir / WORKFLOWS_PARQUET_FILE_NAME
+    response_file = str(cache_dir / RESPONSE_JSON_FILE_NAME)
+    etag_cache_file = str(cache_dir / ETAG_CACHE_FILE_NAME)
+    etag_cache = etag_cache_view.maps[0]
 
     try:
         workflow = workflow_info(
@@ -1252,14 +1270,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
             base_url,
             args.owner,
             args.repo,
-            args.workflow,
+            workflow_name,
             etag_cache=etag_cache_view,
         )
     except requests.HTTPError as error:
         if error.response is not None and error.response.status_code == HTTP_NOT_FOUND:
             parser.error(
                 "Workflow not found (404). Please check --owner, --repo, --workflow and --host. "
-                f"Requested: {args.owner}/{args.repo} workflow {args.workflow}",
+                f"Requested: {args.owner}/{args.repo} workflow {workflow_name}",
             )
         raise
 
@@ -1272,11 +1290,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         cached_data_from_parquet(existing_parquet_rows)
     )
 
-    # The JSON file is deliberately a snapshot of this request only.
     cache = WorkflowCache(
         workflow=create_workflow_cache_entry(workflow, args.owner, args.repo, host),
     )
-
     cached_runs: dict[str, RunEntry] = {}
 
     # Set once the configured --quota-limit is hit; from that point on, no
@@ -1286,14 +1302,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     # ------------------------------------------------------------------
     # Fetch workflow runs
-    #
-    # IMPORTANT:
-    # Only the date range is used as a GitHub API filter.
-    # No status/conclusion filter is applied.
     # ------------------------------------------------------------------
 
     logger.info(
-        f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({args.workflow})"
+        f"Fetching workflow runs for {args.owner}/{args.repo} workflow {workflow['name']} ({workflow_name})",
     )
     logger.info(f"Date range: {args.from_date} .. {args.to_date} ...")
 
@@ -1305,9 +1317,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         nonlocal fetch_error, quota_exceeded
 
         try:
-            # Appended one-by-one (not `runs = list(iter_runs(...))`) so that
-            # runs fetched before a mid-iteration QuotaLimitReachedError
-            # aren't discarded along with the exception.
+            # Keep runs fetched before a quota error so they can still be saved.
             for run in iter_runs(
                 session,
                 base_url,
@@ -1332,12 +1342,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
         name="workflow-run-fetch",
         daemon=True,
     )
-
     fetch_thread.start()
-
-    # ------------------------------------------------------------------
-    # Spinner
-    # ------------------------------------------------------------------
 
     spinner = "|/-\\"
     spinner_index = 0
@@ -1345,7 +1350,6 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     while not fetch_done.wait(0.05):
         char = spinner[spinner_index % len(spinner)]
         spinner_index += 1
-
         sys.stdout.write(f"\rFetching workflow runs ... {char}")
         sys.stdout.flush()
 
@@ -1358,11 +1362,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
 
     if quota_exceeded is not None:
         sys.stdout.write(
-            f"\rFetching workflow runs ... quota limit reached ({len(runs)} run(s) fetched so far)\n"
+            f"\rFetching workflow runs ... quota limit reached ({len(runs)} run(s) fetched so far)\n",
         )
     else:
         sys.stdout.write(
-            f"\rFetching workflow runs ... done ({len(runs)} runs found)\n"
+            f"\rFetching workflow runs ... done ({len(runs)} runs found)\n",
         )
     sys.stdout.flush()
 

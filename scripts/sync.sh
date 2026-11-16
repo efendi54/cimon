@@ -8,7 +8,7 @@ trap 'echo; read -n 1 -s -r -p "Press any key to close this window..."; echo' EX
 
 # CAUTION: change this later
 # -->>
-export GH_TOKEN=$(pass show 'keepass.kdbx/CARIAD/NEW-GH-INSTANCE-TOKEN' | head -n 1)
+# export GH_TOKEN=$(pass show 'keepass.kdbx/CARIAD/NEW-GH-INSTANCE-TOKEN' | head -n 1)
 export GH_HOST=cariad.ghe.com
 export WORKSPACE_FOLDER=/workspaces/app-adas-src
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +20,8 @@ CIMON_VIZ_OUTPUT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)/out/visualizations"
 pushd "$SCRIPT_DIR" >/dev/null
 
 
-required_vars=(GH_TOKEN GH_HOST WORKSPACE_FOLDER)
+# required_vars=(GH_TOKEN GH_HOST WORKSPACE_FOLDER)
+required_vars=(GH_HOST WORKSPACE_FOLDER)
 
 for var in "${required_vars[@]}"; do
   if [ -z "${!var:-}" ]; then

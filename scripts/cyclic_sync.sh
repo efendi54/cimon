@@ -60,7 +60,7 @@ TIMEOUT_RETRY_DELAY_SECONDS="${TIMEOUT_RETRY_DELAY_SECONDS:-60}"
 # CAUTION: change this later (same credentials sync_static_runner_workflows.sh
 # uses; only fetched here, lazily, if not already set in the environment).
 # -->>
-export GH_TOKEN="${GH_TOKEN:-$(pass show 'keepass.kdbx/CARIAD/NEW-GH-INSTANCE-TOKEN' | head -n 1)}"
+# export GH_TOKEN="${GH_TOKEN:-$(pass show 'keepass.kdbx/CARIAD/NEW-GH-INSTANCE-TOKEN' | head -n 1)}"
 export GH_HOST="${GH_HOST:-cariad.ghe.com}"
 
 # Seconds to wait until the GitHub API core quota actually resets (+ a small

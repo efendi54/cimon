@@ -314,7 +314,8 @@ def print_runner_status(runners: list[dict[str, Any]]) -> None:
             if runner.get("status") == "online"
             else "-"
         )
-        logger.info("  %-8s %-4s %s", runner.get("status"), state, runner.get("name"))
+        labels = ", ".join(label.get("name", "") for label in (runner.get("labels") or []))
+        logger.info("  %-8s %-4s %-30s %s", runner.get("status"), state, runner.get("name"), labels)
 
 
 RUNNER_STATUS_PARQUET_FILE_NAME = "runner_status.parquet"

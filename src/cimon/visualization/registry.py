@@ -9,10 +9,11 @@ result out as its own Parquet file, and then calls `render` -- so the
 filtered subset stays inspectable/reusable independently of the render step.
 
 Add a new visualization by adding a spec file under `specs/` and calling
-`register()` with it below. A visualization that depends on parameters
-(`cimon visualize <name> -p KEY=VALUE`) has no spec file: it passes a
-`spec_builder` that builds the filter spec in code, plus its accepted `params`
-(see `Visualization`).
+`register()` with it below, plus a `cimon metrics` subcommand in `cimon.__main__`
+to expose it on the CLI (see the README's "Adding a new visualization" section).
+A visualization that depends on parameters (`cimon metrics <name> -p KEY=VALUE`)
+has no spec file: it passes a `spec_builder` that builds the filter spec in
+code, plus its accepted `params` (see `Visualization`).
 """
 
 from __future__ import annotations
@@ -35,9 +36,9 @@ class Visualization:
 
     Most visualizations use a static `spec_path` and a `render(table, output_dir)` callback. A *parametrized*
     visualization (e.g. one specific workflow run) declares its accepted `params` (name -> help text, passed via
-    `cimon visualize -p NAME=VALUE`), builds its filter spec from them with `spec_builder(params)`, and its `render`
-    is called as `render(table, output_dir, params)`. `spec_builder`/`render` raise `ValueError` for bad parameters
-    or unusable data.
+    `cimon metrics <name> -p NAME=VALUE`), builds its filter spec from them with `spec_builder(params)`, and its
+    `render` is called as `render(table, output_dir, params)`. `spec_builder`/`render` raise `ValueError` for bad
+    parameters or unusable data.
     """
 
     name: str
@@ -76,63 +77,19 @@ def _not_implemented(_table: pa.Table, _output_dir: Path) -> None:
     raise NotImplementedError(msg)
 
 
-def _render_job_durations(table: pa.Table, output_dir: Path) -> None:
-    from cimon.visualization.renderers.job_durations import render  # noqa: PLC0415
-
-    render(table, output_dir)
-
-
-def _render_merge_group_failures(table: pa.Table, output_dir: Path) -> None:
-    from cimon.visualization.renderers.merge_group_failures import (
-        render,  # noqa: PLC0415
-    )
-
-    render(table, output_dir)
-
-
-def _render_runner_status_trend(table: pa.Table, output_dir: Path) -> None:
-    from cimon.visualization.renderers.runner_status_trend import (
-        render,  # noqa: PLC0415
-    )
-
-    render(table, output_dir)
-
-
 def _workflow_job_durations_spec(params: Mapping[str, str]) -> Mapping[str, Any]:
     from cimon.visualization.renderers.run_timeline import spec_for_run  # noqa: PLC0415
 
     return spec_for_run(params)
 
 
-def _render_workflow_job_durations(table: pa.Table, output_dir: Path, params: Mapping[str, str]) -> None:
+def _render_workflow_job_durations(
+    table: pa.Table, output_dir: Path, params: Mapping[str, str]
+) -> None:
     from cimon.visualization.renderers.run_timeline import render_run  # noqa: PLC0415
 
     render_run(table, output_dir, params)
 
-
-register(
-    Visualization(
-        name="job-durations",
-        spec_path=SPECS_DIR / "job_durations.yml",
-        render=_render_job_durations,
-    ),
-)
-
-register(
-    Visualization(
-        name="merge-group-failures",
-        spec_path=SPECS_DIR / "merge_group_failures.yml",
-        render=_render_merge_group_failures,
-    ),
-)
-
-register(
-    Visualization(
-        name="runner-status-trend",
-        spec_path=SPECS_DIR / "runner_status_trend.yml",
-        render=_render_runner_status_trend,
-    ),
-)
 
 register(
     Visualization(

@@ -78,18 +78,29 @@ def prepare_jobs(table: pa.Table, tz: str) -> tuple[pd.DataFrame, pd.Timestamp]:
     snapshot = _to_local(frame["cache_updated_at"], tz).max()
     started = _to_local(frame["job_started_at"], tz)
     has_created = "job_created_at" in frame.columns
-    frame["eligible"] = _to_local(frame["job_created_at"], tz).fillna(started) if has_created else started
+    frame["eligible"] = (
+        _to_local(frame["job_created_at"], tz).fillna(started)
+        if has_created
+        else started
+    )
     queued = frame["job_status"] == "queued"
     frame["start"] = started.mask(queued, snapshot)
     frame["end"] = _to_local(frame["job_completed_at"], tz).fillna(snapshot)
     frame["created"] = _to_local(frame["created_at"], tz)
     frame["state"] = frame["job_conclusion"].fillna(frame["job_status"])
+    frame["job_name"] = frame["job_name"].astype("string").fillna("(unnamed job)")
     frame["stage"] = frame["job_name"].str.split(" / ").str[0]
-    frame["queue_min"] = ((frame["start"] - frame["eligible"]).dt.total_seconds() / 60).clip(lower=0)
-    frame["dur_min"] = ((frame["end"] - frame["start"]).dt.total_seconds() / 60).clip(lower=0)
+    frame["queue_min"] = (
+        (frame["start"] - frame["eligible"]).dt.total_seconds() / 60
+    ).clip(lower=0)
+    frame["dur_min"] = ((frame["end"] - frame["start"]).dt.total_seconds() / 60).clip(
+        lower=0
+    )
     jobs = frame[(frame["job_conclusion"] != "skipped") & frame["start"].notna()]
     if not has_created or frame["job_created_at"].isna().all():
-        logger.warning("No job_created_at in the cache for this run - queue times are unknown (run `cimon sync`).")
+        logger.warning(
+            "No job_created_at in the cache for this run - queue times are unknown (run `cimon sync`)."
+        )
     return jobs.copy(), snapshot
 
 
@@ -111,7 +122,8 @@ def stage_contribution(jobs: pd.DataFrame, wall_minutes: float) -> pd.DataFrame:
     rows = {}
     for stage, group in jobs.groupby("stage"):
         wall = union_minutes(group["start"], group["end"])
-        queue_wall = union_minutes(group["eligible"], group["start"])
+        waiting = group[group["start"] >= group["eligible"]]
+        queue_wall = union_minutes(waiting["eligible"], waiting["start"])
         rows[stage] = {
             "jobs": len(group),
             "sum_h": group["dur_min"].sum() / 60,
@@ -120,7 +132,8 @@ def stage_contribution(jobs: pd.DataFrame, wall_minutes: float) -> pd.DataFrame:
             "queue_sum_h": group["queue_min"].sum() / 60,
             "queue_wall_h": queue_wall / 60,
             "queue_share_pct": queue_wall / wall_minutes * 100 if wall_minutes else 0.0,
-            "span_h": (group["end"].max() - group["eligible"].min()).total_seconds() / 3600,
+            "span_h": (group["end"].max() - group["eligible"].min()).total_seconds()
+            / 3600,
         }
     return pd.DataFrame.from_dict(rows, orient="index").sort_values("span_h")
 
@@ -128,22 +141,31 @@ def stage_contribution(jobs: pd.DataFrame, wall_minutes: float) -> pd.DataFrame:
 def critical_path(jobs: pd.DataFrame, gap_seconds: int) -> pd.DataFrame:
     """Heuristic critical path, see the module docstring."""
     path = []
+    visited: set[Any] = set()
     current = jobs.loc[jobs["end"].idxmax()]
     while current is not None:
         path.append(current)
+        visited.add(current.name)
         candidates = jobs[
             (jobs["end"] <= current["eligible"] + pd.Timedelta(seconds=gap_seconds))
             & (jobs["start"] < current["eligible"])
             & (jobs["dur_min"] >= MIN_CRITICAL_JOB_MINUTES)
+            & (~jobs.index.isin(visited))
         ]
-        current = candidates.loc[candidates["end"].idxmax()] if not candidates.empty else None
+        current = (
+            candidates.loc[candidates["end"].idxmax()] if not candidates.empty else None
+        )
     return pd.DataFrame(path[::-1])
 
 
 def _segments(jobs: pd.DataFrame) -> pd.DataFrame:
     """One row per waiting phase (created -> started) and per running phase (started -> completed) of each job."""
-    waiting = jobs[jobs["queue_min"] > 0].assign(seg_start=jobs["eligible"], seg_end=jobs["start"], seg=WAITING)
-    running = jobs[~((jobs["job_status"] == "queued") | (jobs["start"] == jobs["end"]))].assign(
+    waiting = jobs[jobs["queue_min"] > 0].assign(
+        seg_start=jobs["eligible"], seg_end=jobs["start"], seg=WAITING
+    )
+    running = jobs[
+        ~((jobs["job_status"] == "queued") | (jobs["start"] == jobs["end"]))
+    ].assign(
         seg_start=jobs["start"],
         seg_end=jobs["end"],
         seg=jobs["state"],
@@ -151,8 +173,15 @@ def _segments(jobs: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([waiting, running], ignore_index=True)
 
 
-def _timeline_figure(jobs: pd.DataFrame, title: str, run_url: str | None, snapshot: pd.Timestamp, tz: str) -> go.Figure:
-    order = jobs.groupby("stage")["eligible"].min().sort_values(ascending=False).index.tolist()
+def _timeline_figure(
+    jobs: pd.DataFrame, title: str, run_url: str | None, snapshot: pd.Timestamp, tz: str
+) -> go.Figure:
+    order = (
+        jobs.groupby("stage")["eligible"]
+        .min()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
     link = (
         f'<br><a href="{html.escape(run_url, quote=True)}" target="_blank">{html.escape(run_url)}</a>'
         if run_url
@@ -179,7 +208,9 @@ def _timeline_figure(jobs: pd.DataFrame, title: str, run_url: str | None, snapsh
         title=f"{title}{link}<br><sup>{subtitle}</sup>",
     )
     figure.update_traces(opacity=0.75)
-    figure.update_layout(barmode="overlay", height=max(450, 24 * len(order) + 150), legend_title="Status")
+    figure.update_layout(
+        barmode="overlay", height=max(450, 24 * len(order) + 150), legend_title="Status"
+    )
     if (jobs["job_completed_at"].isna()).any():
         figure.add_shape(
             type="line",
@@ -190,7 +221,14 @@ def _timeline_figure(jobs: pd.DataFrame, title: str, run_url: str | None, snapsh
             yref="paper",
             line={"dash": "dash", "color": "black"},
         )
-        figure.add_annotation(x=snapshot, y=1, yref="paper", text="Snapshot", showarrow=False, yanchor="bottom")
+        figure.add_annotation(
+            x=snapshot,
+            y=1,
+            yref="paper",
+            text="Snapshot",
+            showarrow=False,
+            yanchor="bottom",
+        )
     return figure
 
 
@@ -216,7 +254,12 @@ def _contribution_figure(stages: pd.DataFrame, run_id: str) -> go.Figure:
         customdata=stages[["wall_share_pct", "jobs"]],
         hovertemplate="%{y}<br>%{x:.2f} h = %{customdata[0]:.0f}% of the run<br>%{customdata[1]:.0f} jobs",
     )
-    figure.add_bar(y=stages.index, x=stages["sum_h"], orientation="h", name="Summed running time (effort)")
+    figure.add_bar(
+        y=stages.index,
+        x=stages["sum_h"],
+        orientation="h",
+        name="Summed running time (effort)",
+    )
     figure.update_layout(
         title=f"Contribution per stage - run {run_id}",
         barmode="group",
@@ -230,7 +273,9 @@ def _critical_path_figure(path: pd.DataFrame, wall_minutes: float) -> go.Figure:
     waiting_h = path["queue_min"].sum() / 60
     path_h = (path["queue_min"] + path["dur_min"]).sum() / 60
     figure = px.bar(
-        _segments(path).assign(seg_min=lambda d: (d["seg_end"] - d["seg_start"]).dt.total_seconds() / 60),
+        _segments(path).assign(
+            seg_min=lambda d: (d["seg_end"] - d["seg_start"]).dt.total_seconds() / 60
+        ),
         x="seg_min",
         y="job_name",
         orientation="h",
@@ -243,7 +288,9 @@ def _critical_path_figure(path: pd.DataFrame, wall_minutes: float) -> go.Figure:
         labels={"seg_min": "minutes", "job_name": "", "seg": "Status"},
         category_orders={"job_name": path["job_name"].tolist()},
     )
-    figure.update_layout(height=max(300, 40 * len(path) + 150), yaxis_autorange="reversed")
+    figure.update_layout(
+        height=max(300, 40 * len(path) + 150), yaxis_autorange="reversed"
+    )
     return figure
 
 
@@ -264,7 +311,9 @@ def render(
     first = table.slice(0, 1).to_pylist()[0]
     run_id, attempt = first["run_id"], first["run_attempt"]
     if jobs.empty:
-        logger.warning(f"Run {run_id} has no started, non-skipped jobs - nothing to plot.")
+        logger.warning(
+            f"Run {run_id} has no started, non-skipped jobs - nothing to plot."
+        )
         return None
 
     # A rerun attempt keeps the original `created_at`, so measure it from its first job instead.
@@ -298,7 +347,9 @@ def render(
         handle.write("</body></html>")
 
     logger.info(f"{title}")
-    logger.info(f"Contribution per stage:\n{stages.sort_values('span_h', ascending=False).round(2).to_string()}")
+    logger.info(
+        f"Contribution per stage:\n{stages.sort_values('span_h', ascending=False).round(2).to_string()}"
+    )
     logger.info(
         "Critical path (heuristic, %.1f h, thereof %.1f h waiting for a runner):\n%s",
         (path["queue_min"] + path["dur_min"]).sum() / 60,
@@ -314,12 +365,16 @@ def render(
 def spec_for_run(params: Mapping[str, str]) -> dict[str, Any]:
     """Select a run URL or the run references from a Parquet selection."""
     if params.get("run-urls-file"):
-        from cimon.visualization.renderers.run_averages import selection_urls  # noqa: PLC0415
+        from cimon.visualization.renderers.run_averages import (
+            selection_urls,  # noqa: PLC0415
+        )
 
         if params.get("run-url"):
             msg = "Use either 'run-url' or 'run-urls-file', not both."
             raise ValueError(msg)
-        return {"any": [spec_for_run({"run-url": url}) for url in selection_urls(params)]}
+        return {
+            "any": [spec_for_run({"run-url": url}) for url in selection_urls(params)]
+        }
     if "individual-html" in params:
         msg = "Parameter 'individual-html' requires 'run-urls-file'."
         raise ValueError(msg)
@@ -348,13 +403,23 @@ def render_run(table: pa.Table, output_dir: Path, params: Mapping[str, str]) -> 
         raise ValueError(msg) from None
 
     if params.get("run-urls-file"):
-        from cimon.visualization.renderers.run_averages import render_selection  # noqa: PLC0415
+        from cimon.visualization.renderers.run_averages import (
+            render_selection,  # noqa: PLC0415
+        )
 
         render_selection(table, output_dir, params, gap_seconds)
         return
 
     attempt = pc.max(table.column("run_attempt")).as_py()
     attempt_table = table.filter(pc.equal(table.column("run_attempt"), attempt))
-    if render(attempt_table, output_dir, tz=params.get("tz", DEFAULT_TZ), gap_seconds=gap_seconds) is None:
+    if (
+        render(
+            attempt_table,
+            output_dir,
+            tz=params.get("tz", DEFAULT_TZ),
+            gap_seconds=gap_seconds,
+        )
+        is None
+    ):
         msg = f"Run attempt {attempt} has no started, non-skipped jobs in the cache - nothing to plot."
         raise ValueError(msg)

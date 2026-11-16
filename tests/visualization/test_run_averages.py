@@ -9,11 +9,14 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from click.testing import CliRunner
-
 from cimon.__main__ import main
-from cimon.visualization.renderers.run_averages import average_figure, job_averages, select_attempts
+from cimon.visualization.renderers.run_averages import (
+    average_figure,
+    job_averages,
+    select_attempts,
+)
 from cimon.workflows.run_url import parse_workflow_run_url
+from click.testing import CliRunner
 
 from tests.visualization.test_workflow_job_durations import RUN_URL, _job, _write_cache
 
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
 def _visualize(tmp_path: Path, *extra: str) -> Result:
     return CliRunner().invoke(
         main,
-        ["visualize", "workflow-job-durations", "-o", str(tmp_path / "out"), *extra],
+        ["metrics", "workflow-job-durations", "-o", str(tmp_path / "out"), *extra],
     )
 
 
@@ -50,8 +53,14 @@ def _selection(tmp_path: Path, urls: list[str | None]) -> str:
                     == (ref.host, ref.owner, ref.repo, ref.run_id)
                     and (ref.attempt is None or row["run_attempt"] == ref.attempt)
                 ]
-        selected.extend([{**row, "workflow_run_url": url} for row in (matches or rows[:1])])
-    table = pa.Table.from_pylist(selected, schema=cache.schema) if selected else cache.slice(0, 0)
+        selected.extend(
+            [{**row, "workflow_run_url": url} for row in (matches or rows[:1])]
+        )
+    table = (
+        pa.Table.from_pylist(selected, schema=cache.schema)
+        if selected
+        else cache.slice(0, 0)
+    )
     pq.write_table(table, path)
     return f"run-urls-file={path}"
 
@@ -68,11 +77,15 @@ def _completed(run_id: str, *, attempt: int = 1) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("individual", [True, False])
-def test_batch_writes_summary_and_optional_individual_pages(tmp_path: Path, *, individual: bool) -> None:
+def test_batch_writes_summary_and_optional_individual_pages(
+    tmp_path: Path, *, individual: bool
+) -> None:
     """Repeated URLs do not multiply samples or per-run output."""
     _write_cache(tmp_path / "cache", [_completed("100"), _completed("200")])
     selection = _selection(tmp_path, [RUN_URL, RUN_URL, RUN_URL.replace("100", "200")])
-    result = _visualize(tmp_path, "-p", selection, "-p", f"individual-html={str(individual).lower()}")
+    result = _visualize(
+        tmp_path, "-p", selection, "-p", f"individual-html={str(individual).lower()}"
+    )
 
     assert result.exit_code == 0, (result.output, result.exception)
     pages = list((tmp_path / "out").glob("*/averages.html"))
@@ -81,7 +94,9 @@ def test_batch_writes_summary_and_optional_individual_pages(tmp_path: Path, *, i
     assert "2 run attempts" in content
     assert "waiting for runner" in content
     assert "total (paired samples)" in content
-    assert len(list((tmp_path / "out").rglob("run-*-attempt-*.html"))) == (2 if individual else 0)
+    assert len(list((tmp_path / "out").rglob("run-*-attempt-*.html"))) == (
+        2 if individual else 0
+    )
     runs_dir = pages[0].parent / "runs"
     assert runs_dir.exists() is individual
     if individual:
@@ -89,7 +104,9 @@ def test_batch_writes_summary_and_optional_individual_pages(tmp_path: Path, *, i
             "run-100-attempt-1.html",
             "run-200-attempt-1.html",
         }
-    assert pq.read_table(tmp_path / "out" / "workflow-job-durations.parquet").num_rows == 2
+    assert (
+        pq.read_table(tmp_path / "out" / "workflow-job-durations.parquet").num_rows == 2
+    )
 
 
 def test_batch_defaults_to_individual_pages(tmp_path: Path) -> None:
@@ -102,8 +119,12 @@ def test_batch_defaults_to_individual_pages(tmp_path: Path) -> None:
 
 def test_selection_resolves_latest_explicit_and_overlapping_attempts() -> None:
     """A base URL and its latest explicit attempt count once; older explicit attempts remain selected."""
-    table = pa.Table.from_pylist([_completed("100"), _completed("100", attempt=2), _completed("200")])
-    selected = select_attempts(table, [RUN_URL, f"{RUN_URL}/attempts/2", f"{RUN_URL}/attempts/1"])
+    table = pa.Table.from_pylist(
+        [_completed("100"), _completed("100", attempt=2), _completed("200")]
+    )
+    selected = select_attempts(
+        table, [RUN_URL, f"{RUN_URL}/attempts/2", f"{RUN_URL}/attempts/1"]
+    )
 
     assert selected.num_rows == 2
     assert set(selected.column("run_attempt").to_pylist()) == {1, 2}
@@ -112,7 +133,9 @@ def test_selection_resolves_latest_explicit_and_overlapping_attempts() -> None:
 def test_averages_exclude_incomplete_and_missing_timings_per_metric() -> None:
     """Missing waits are not zero; failed jobs are not mixed with successes."""
     second = _completed("200")
-    second.update(job_started_at="2026-11-04T19:04:00Z", job_completed_at="2026-11-04T19:24:00Z")
+    second.update(
+        job_started_at="2026-11-04T19:04:00Z", job_completed_at="2026-11-04T19:24:00Z"
+    )
     unknown_wait = _completed("300")
     unknown_wait["job_created_at"] = None
     failure = _completed("400")
@@ -122,9 +145,21 @@ def test_averages_exclude_incomplete_and_missing_timings_per_metric() -> None:
     skipped = _completed("600")
     skipped["job_conclusion"] = "skipped"
     invalid = _completed("700")
-    invalid.update(job_started_at="2026-11-04T18:00:00Z", job_completed_at="2026-11-04T17:00:00Z")
+    invalid.update(
+        job_started_at="2026-11-04T18:00:00Z", job_completed_at="2026-11-04T17:00:00Z"
+    )
     summary = job_averages(
-        pa.Table.from_pylist([_completed("100"), second, unknown_wait, failure, running, skipped, invalid]),
+        pa.Table.from_pylist(
+            [
+                _completed("100"),
+                second,
+                unknown_wait,
+                failure,
+                running,
+                skipped,
+                invalid,
+            ]
+        ),
     ).droplevel(["host", "owner", "repo", "workflow_file"])
     success = summary.loc[("Build / compile", "success")]
 
@@ -171,7 +206,9 @@ def test_batch_separates_workflows(tmp_path: Path) -> None:
     assert len(list((tmp_path / "out").glob("*/averages.html"))) == 2
 
 
-def test_workflow_directories_group_averages_with_their_own_runs(tmp_path: Path) -> None:
+def test_workflow_directories_group_averages_with_their_own_runs(
+    tmp_path: Path,
+) -> None:
     """Each workflow average shares its directory only with that workflow's run pages."""
     other = _completed("200")
     other["workflow_file"] = ".github/workflows/pr.yml"
@@ -192,7 +229,9 @@ def test_workflow_directories_group_averages_with_their_own_runs(tmp_path: Path)
 
 
 @pytest.mark.parametrize("urls", [[], [None], [""], ["https://example.com/pull/1"]])
-def test_batch_rejects_invalid_selection(tmp_path: Path, urls: list[str | None]) -> None:
+def test_batch_rejects_invalid_selection(
+    tmp_path: Path, urls: list[str | None]
+) -> None:
     _write_cache(tmp_path / "cache")
     result = _visualize(tmp_path, "-p", _selection(tmp_path, urls))
 
@@ -210,7 +249,9 @@ def test_batch_rejects_missing_column(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("extra", ["individual-html=maybe", f"run-url={RUN_URL}"])
-def test_batch_rejects_conflicting_or_invalid_options(tmp_path: Path, extra: str) -> None:
+def test_batch_rejects_conflicting_or_invalid_options(
+    tmp_path: Path, extra: str
+) -> None:
     _write_cache(tmp_path / "cache")
     result = _visualize(tmp_path, "-p", _selection(tmp_path, [RUN_URL]), "-p", extra)
     assert result.exit_code != 0
@@ -293,7 +334,9 @@ def test_selection_missing_file_is_reported(tmp_path: Path) -> None:
 
 def test_zero_duration_is_a_valid_sample() -> None:
     row = _completed("100")
-    row.update(job_started_at=row["job_created_at"], job_completed_at=row["job_created_at"])
+    row.update(
+        job_started_at=row["job_created_at"], job_completed_at=row["job_created_at"]
+    )
     summary = job_averages(pa.Table.from_pylist([row]))
 
     assert summary[("queue_min", "mean")].iloc[0] == 0
@@ -301,7 +344,9 @@ def test_zero_duration_is_a_valid_sample() -> None:
     assert summary[("total_min", "count")].iloc[0] == 1
 
 
-def test_batch_uses_supplied_job_data_without_any_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_batch_uses_supplied_job_data_without_any_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A standalone Parquet file is sufficient and its durations are the source of truth."""
     path = tmp_path / "jobs.parquet"
     row = _completed("100")

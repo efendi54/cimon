@@ -1,2 +1,0 @@
-column: polled_at
-op: is_not_null

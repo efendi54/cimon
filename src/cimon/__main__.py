@@ -26,7 +26,7 @@ from cimon.github_api import (
     resolve_token,
 )
 from cimon.parquet_io import write_table_atomic
-from cimon.visualization import pipeline, registry
+from cimon.visualization import pipeline
 from cimon.workflows import synch
 from cimon.workflows.build_metrics import process_input as run_build_metrics
 from cimon.workflows.download_logs import run as run_download_logs
@@ -203,7 +203,12 @@ def runners(
         raise click.Abort from None
 
 
-@main.command("build-metrics")
+@main.group("metrics")
+def metrics() -> None:
+    """Build-cache and workflow-run metrics: extract or visualize them."""
+
+
+@metrics.command("build-metrics")
 @click.argument("input_arg", metavar="INPUT")
 @click.argument(
     "output_dir",
@@ -452,15 +457,14 @@ def _parse_params(raw_params: tuple[str, ...]) -> dict[str, str]:
     return params
 
 
-@main.command("visualize")
-@click.argument("names", nargs=-1)
+@metrics.command("workflow-job-durations")
 @click.option(
     "-i",
     "--input",
     "input_path",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
     help="Path to the workflows Parquet cache to filter. Defaults to ~/.cache/cimon. "
-    "Not used with workflow-job-durations -p run-urls-file (that file supplies the job data).",
+    "Not used with -p run-urls-file (that file supplies the job data).",
 )
 @click.option(
     "-o",
@@ -476,50 +480,23 @@ def _parse_params(raw_params: tuple[str, ...]) -> dict[str, str]:
     "raw_params",
     multiple=True,
     metavar="KEY=VALUE",
-    help="Parameter for a parametrized visualization, e.g. -p run-url=<URL>. Can be given multiple times.",
+    help="Parameter, e.g. -p run-url=<URL>. Can be given multiple times. Accepted: run-url, "
+    "run-urls-file, individual-html, tz, gap.",
 )
-@click.option(
-    "-l",
-    "--list",
-    "list_only",
-    is_flag=True,
-    help="List the registered visualization names (and their parameters) and exit.",
-)
-def visualize(
-    names: tuple[str, ...],
+def workflow_job_durations(
     input_path: Path | None,
     output_dir: Path,
     raw_params: tuple[str, ...],
-    *,
-    list_only: bool,
 ) -> None:
-    """Filter the workflows Parquet cache per one or more registered visualizations' specs, then render them.
+    """Filter the workflows Parquet cache for one workflow run and render its job-duration timeline.
 
-    NAMES can be given more than once (e.g. `cimon visualize job-durations
-    merge-group-failures`) to run several visualizations in one call.
-
-    Parametrized visualizations take their parameters via -p, e.g. `cimon visualize workflow-job-durations
-    -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>`.
-
-    See cimon.visualization.registry for the list of registered visualizations
-    and how to add new ones.
+    Pass the run via -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>, or -p
+    run-urls-file=<parquet> to average job phases across several selected runs instead. See
+    cimon.visualization.registry's workflow-job-durations entry for all accepted -p parameters.
     """
-    if list_only:
-        for name in registry.available():
-            params = registry.get(name).params
-            click.echo(name)
-            for param, description in params.items():
-                click.echo(f"    -p {param}=...  {description}")
-        return
-
-    if not names:
-        msg = "Missing argument 'NAMES'. Use --list to see available visualizations."
-        raise click.UsageError(msg)
-
     params = _parse_params(raw_params)
     try:
-        for name in names:
-            pipeline.run(name, input_path, output_dir, params)
+        pipeline.run("workflow-job-durations", input_path, output_dir, params)
     except KeyError as exc:
         raise click.UsageError(str(exc)) from None
     except ValueError as exc:

@@ -20,8 +20,8 @@ cache and builds tooling on top of it:
 - **Querying** -- filter that cache declaratively (Python API, YAML/JSON spec
   files, or the `query` CLI command) to answer questions like "which jobs
   failed in the last week" or "which runners are currently busy".
-- **Visualizing** -- turn filtered cache data into charts (job durations,
-  merge-group failures, ...) through a small, pluggable rendering pipeline.
+- **Visualizing** -- turn filtered cache data into charts (workflow-run job
+  durations, ...) through a small, pluggable rendering pipeline.
 
 At a glance, the three features form one pipeline -- each stage reads the
 Parquet file the previous one wrote:
@@ -40,7 +40,7 @@ REST API and persists it into a local, append/merge-able Parquet cache
 (`workflows.parquet`, one row per run **and** job -- see
 [Querying the workflows cache](docs/references/workflow-query.md) for the
 row layout). Every other feature that works with workflow-run data (`query`,
-`visualize`, `cache-info`) reads from this cache, not the API directly.
+`metrics`, `cache-info`) reads from this cache, not the API directly.
 
 ```mermaid
 flowchart LR
@@ -217,8 +217,8 @@ flowchart LR
 - a fluent Python builder (`WorkflowQuery`), for ad-hoc use in scripts/notebooks;
 - a declarative YAML/JSON **spec file**, for anything that needs to be
   supplied dynamically (a CLI flag, a saved config, ...) -- and reused as-is
-  by both the `query` CLI command and `cimon visualize` (see
-  [Visualizations](#visualizations) below);
+  by both the `query` CLI command and `cimon metrics workflow-job-durations`
+  (see [Visualizations](#visualizations) below);
 - the `cimon query` CLI command, which applies one or more spec files to a
   Parquet cache and writes the filtered rows to a new Parquet file.
 
@@ -274,7 +274,7 @@ full row layout, the complete list of supported operators (`eq`, `between`,
 
 ### Build metrics
 
-`cimon build-metrics` extracts Bazel build duration and cache-hit information
+`cimon metrics build-metrics` extracts Bazel build duration and cache-hit information
 from GitHub Actions job logs. It accepts one of three input forms:
 
 - a single GitHub Actions job URL;
@@ -330,7 +330,7 @@ entirely resolved by the remote cache.
 #### Example: one job
 
 ```bash
-uv run cimon build-metrics \
+uv run cimon metrics build-metrics \
   https://cariad.ghe.com/CAS/app-adas-src/actions/runs/281903722/job/1159770792 \
   out/build-metrics
 ```
@@ -347,7 +347,7 @@ uv run cimon query tests/example_specs/filter_build_jobs.yml \
   -c job_url \
   -c job_runner_name
 
-uv run cimon build-metrics build_jobs.parquet out/build-metrics
+uv run cimon metrics build-metrics build_jobs.parquet out/build-metrics
 ```
 
 The output is organized by workflow run and job ID:
@@ -390,7 +390,7 @@ from the cached logs. If no output directory is given, it defaults to `/tmp`.
 
 `cimon download-logs` downloads job log(s) into
 `OUTPUT_DIR/<run_id>/<job_id>.log`, accepting the same three input forms as
-`cimon build-metrics` (a job URL, a JSON array, or a Parquet file with a
+`cimon metrics build-metrics` (a job URL, a JSON array, or a Parquet file with a
 `job_url` column) and reusing the same download routine, including skipping
 already-downloaded, non-empty logs:
 
@@ -445,43 +445,36 @@ flowchart LR
 ```
 
 Each visualization is registered under a short name in
-[`cimon.visualization.registry`](src/cimon/visualization/registry.py) and run via:
+[`cimon.visualization.registry`](src/cimon/visualization/registry.py), and exposed as its own
+`cimon metrics` subcommand:
 
 ```bash
-uv run --extra viz cimon visualize --list   # show all registered names
-uv run --extra viz cimon visualize <name> -i workflows.parquet -o out/visualizations
+uv run cimon metrics workflow-job-durations -i workflows.parquet -o out/visualizations -p run-url=<URL>
 ```
 
-Multiple names can be given at once to run several visualizations in one call:
-
-```bash
-uv run --extra viz cimon visualize job-durations merge-group-failures -i workflows.parquet -o out/visualizations
-```
-
-DuckDB-backed renderers need the optional `viz` dependency group (`duckdb`) --
-install it once with `uv sync --extra viz --group test`. Pandas and Plotly are
-standard dependencies because they are also required by `cimon build-metrics`.
+Pandas and Plotly are standard dependencies, required by both `cimon metrics build-metrics` and
+`cimon metrics workflow-job-durations`.
 
 Currently registered:
 
 | Name | Spec | What it shows |
 |---|---|---|
-| `job-durations` | [`job_durations.yml`](src/cimon/visualization/specs/job_durations.yml) | job duration over time for completed (successful) or still-running jobs -- one HTML page per workflow |
 | `workflow-job-durations` | none (spec built from `run-url` or `run-urls-file`) | single-run timeline and contribution, or average job phases across selected runs, see [Analyzing one workflow run](#analyzing-one-workflow-run) |
 
 ### Adding a new visualization
 
 A visualization is three small pieces: a filter spec, a render function, and
-one line registering them together. (If it depends on parameters, the "spec" is
+one line registering them together, plus a `cimon metrics` subcommand to expose it on the CLI
+(the registry itself does not auto-generate one). (If it depends on parameters, the "spec" is
 a `spec_builder` function instead of a YAML file, see
 [Analyzing one workflow run](#analyzing-one-workflow-run).) As an example, here's a simplified
-version of how `job-durations` is built.
+version of a hypothetical `example-viz`.
 
 ```mermaid
 flowchart LR
     A["1. filter spec<br>(YAML)"] --> C["register()"]
     B["2. render(table,<br>output_dir)"] --> C
-    C --> D["cimon visualize &lt;name&gt;"]
+    C --> D["3. cimon metrics &lt;name&gt;<br>(wired in __main__.py)"]
 ```
 
 **1. Write a filter spec** -- a YAML file describing which rows to keep (see
@@ -489,7 +482,7 @@ flowchart LR
 full spec syntax):
 
 ```yaml
-# src/cimon/visualization/specs/job_durations.yml
+# src/cimon/visualization/specs/example_viz.yml
 any:
   - all:
       - column: job_status
@@ -504,66 +497,60 @@ any:
 ```
 
 **2. Write a render function** -- it takes the already-filtered `pa.Table`
-and an output directory, and produces whatever chart(s) you want. Any
-library is fine (Plotly, matplotlib, Textual, ...); this one uses DuckDB to
-reshape the data and Plotly to plot it:
+and an output directory, and produces whatever chart(s) you want (Plotly, matplotlib,
+Textual, ...):
 
 ```python
-# src/cimon/visualization/renderers/job_durations.py
+# src/cimon/visualization/renderers/example_viz.py
 def render(table: pa.Table, output_dir: Path) -> None:
-    con = duckdb.connect()
-    con.register("jobs", table)
-    frame = con.execute("""
-        SELECT workflow_name, workflow_file, job_name,
-               cast(created_at AS TIMESTAMPTZ) AS created_at, job_active_duration_sec
-        FROM jobs
-        WHERE job_active_duration_sec IS NOT NULL
-    """).df()
-
+    frame = table.to_pandas()
     for workflow_file, group in frame.groupby("workflow_file"):
         figure = px.scatter(group, x="created_at", y="job_active_duration_sec", color="job_name")
-        figure.write_html(output_dir / "job-durations" / f"{workflow_file}.html")
+        figure.write_html(output_dir / "example-viz" / f"{workflow_file}.html")
 ```
 
 **3. Register it** in
-[`cimon.visualization.registry`](src/cimon/visualization/registry.py) -- the
-import of the render function is deferred so `cimon` keeps working without
-the `viz` extra installed unless a DuckDB-backed visualization is actually run:
+[`cimon.visualization.registry`](src/cimon/visualization/registry.py):
 
 ```python
-def _render_job_durations(table: pa.Table, output_dir: Path) -> None:
-    from cimon.visualization.renderers.job_durations import render
+def _render_example_viz(table: pa.Table, output_dir: Path) -> None:
+    from cimon.visualization.renderers.example_viz import render
 
     render(table, output_dir)
 
 
 register(
     Visualization(
-        name="job-durations",
-        spec_path=SPECS_DIR / "job_durations.yml",
-        render=_render_job_durations,
+        name="example-viz",
+        spec_path=SPECS_DIR / "example_viz.yml",
+        render=_render_example_viz,
     ),
 )
 ```
 
+**4. Wire a `cimon metrics` subcommand** in [`cimon.__main__`](src/cimon/__main__.py), following
+the `workflow-job-durations` command as a template -- it just needs to call
+`pipeline.run("example-viz", input_path, output_dir, params)`.
+
 That's it:
 
 ```bash
-uv run --extra viz cimon visualize job-durations -i workflows.parquet -o out/visualizations
+uv run cimon metrics example-viz -i workflows.parquet -o out/visualizations
 ```
 
-now filters the cache and writes one duration chart per workflow file.
+now filters the cache and writes one chart per workflow file.
 
 ### Analyzing one workflow run
+
 
 The parametrized visualization `workflow-job-durations` answers "where does the runtime of *this* run go?" for a
 single workflow run. It takes a workflow-run URL (as copied from the browser) via `-p run-url=...`, reads that run
 from the cache (default `~/.cache/cimon/workflows.parquet`, or `-i`) and writes one HTML page:
 
 ```bash
-uv run cimon visualize workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>
+uv run cimon metrics workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>
 # a specific attempt:
-uv run cimon visualize workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>/attempts/2
+uv run cimon metrics workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>/attempts/2
 ```
 
 The run has to be in the cache (see `cimon sync`); without `/attempts/<n>` the latest cached attempt is used.
@@ -599,13 +586,13 @@ keeping all job columns rather than restricting the output to URLs.
 
 ```bash
 # Average pages only, directly from the supplied job data:
-uv run cimon visualize workflow-job-durations \
+uv run cimon metrics workflow-job-durations \
   -p run-urls-file=selected-runs.parquet \
   -p individual-html=false \
   -o out/averages
 
 # Average pages plus the existing per-run pages (the default):
-uv run cimon visualize workflow-job-durations \
+uv run cimon metrics workflow-job-durations \
   -p run-urls-file=selected-runs.parquet \
   -o out/averages
 ```
@@ -651,4 +638,5 @@ The existing intermediate `workflow-job-durations.parquet` remains inspectable.
 Parametrized visualizations are registered like the others, but instead of a static `spec_path` (YAML file) they
 provide a `spec_builder(params)` that builds the filter spec in code from the `-p` parameters, declare their accepted
 `params`, and their `render` receives the parameters as a third argument (see
-`cimon.visualization.registry.Visualization`). `cimon visualize --list` shows the parameters.
+`cimon.visualization.registry.Visualization`). The accepted `-p` parameters are listed in the `--help` output of
+the corresponding `cimon metrics` subcommand.

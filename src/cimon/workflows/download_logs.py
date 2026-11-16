@@ -5,7 +5,7 @@ Accepts a single workflow-job URL, a JSON array of URL strings, or a Parquet
 file with a `job_url` column (e.g. produced by `cimon query -c job_url`) --
 see `resolve_job_urls`. Each job's log is downloaded via the shared
 `download_job_log_for_url` routine into `output_dir/logs/<run_id>/<job_id>.log`,
-the same layout used by `cimon build-metrics`.
+the same layout used by `cimon metrics build-metrics`.
 
 Downloaded logs are always kept (never silently deleted at the end of a run)
 so a later call over the same/overlapping input can skip logs it already
@@ -80,7 +80,9 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
     return log_path
 
 
-def _delete_non_matching_logs(log_paths: dict[int, Path], matched_indices: list[int]) -> None:
+def _delete_non_matching_logs(
+    log_paths: dict[int, Path], matched_indices: list[int]
+) -> None:
     """Delete every downloaded log in `log_paths` whose index isn't in `matched_indices`.
 
     Also removes the per-run directory (`<run_id>/`) once it's left empty,

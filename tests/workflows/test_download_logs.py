@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-
 from cimon.workflows import build_metrics, download_logs
 
 if TYPE_CHECKING:
@@ -97,7 +96,7 @@ def test_run_accepts_single_job_url(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bare job URL is accepted directly, matching cimon build-metrics' input forms."""
+    """A bare job URL is accepted directly, matching cimon metrics build-metrics' input forms."""
     monkeypatch.setattr(build_metrics, "ensure_github_auth", lambda _host: None)
     monkeypatch.setattr(build_metrics, "download_job_log", _fake_download_job_log)
 
@@ -114,7 +113,7 @@ def test_run_accepts_json_array_of_urls(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A JSON array of plain URL strings is accepted, matching cimon build-metrics' JSON form."""
+    """A JSON array of plain URL strings is accepted, matching cimon metrics build-metrics' JSON form."""
     monkeypatch.setattr(build_metrics, "ensure_github_auth", lambda _host: None)
     monkeypatch.setattr(build_metrics, "download_job_log", _fake_download_job_log)
 

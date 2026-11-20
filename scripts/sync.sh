@@ -6,21 +6,14 @@ set -euo pipefail
 # how it exits, so quota/other errors stay readable instead of vanishing.
 trap 'echo; read -n 1 -s -r -p "Press any key to close this window..."; echo' EXIT
 
-# CAUTION: change this later
-# -->>
-# export GH_TOKEN=$(pass show 'keepass.kdbx/CARIAD/NEW-GH-INSTANCE-TOKEN' | head -n 1)
 export GH_HOST=cariad.ghe.com
 export WORKSPACE_FOLDER=/workspaces/app-adas-src
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CIMON_CACHE_DIR=${HOME}/.cache/cimon
-# Absolute (not pushd-relative), so it doesn't silently drift to scripts/out/...
 CIMON_VIZ_OUTPUT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)/out/visualizations"
-# <<--
 
 pushd "$SCRIPT_DIR" >/dev/null
 
-
-# required_vars=(GH_TOKEN GH_HOST WORKSPACE_FOLDER)
 required_vars=(GH_HOST WORKSPACE_FOLDER)
 
 for var in "${required_vars[@]}"; do
@@ -46,14 +39,15 @@ if [ $# -ge 2 ]; then
   export TO_DATE="$2"
 fi
 
-for wf in "${wf_files[@]}"; do
-  if ! uv run cimon sync --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"; then
-    rc=$?
-    echo "cimon sync failed for workflow '$wf' (exit code $rc, likely quota limit reached). Stopping sync." >&2
-    break
-  fi
-done
-# uv run cimon sync --workflow pr.yml --from-date "$(date -I)"
-# uv run cimon sync --workflow qg_cas_build_and_test.yml --from-date "$(date -I)"
-  
+#for wf in "${wf_files[@]}"; do
+#  if ! uv run cimon sync --cache-dir "$CIMON_CACHE_DIR" --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"; then
+#    rc=$?
+#    echo "cimon sync failed for workflow '$wf' (exit code $rc, likely quota limit reached). Stopping sync." >&2
+#    break
+#  fi
+#done
+
+"$SCRIPT_DIR/filter_merge_queue_failures.sh"
+
+
 popd >/dev/null

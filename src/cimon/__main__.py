@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 import pyarrow.dataset as ds
@@ -31,6 +32,9 @@ from cimon.workflows import synch
 from cimon.workflows.build_metrics import process_input as run_build_metrics
 from cimon.workflows.download_logs import run as run_download_logs
 from cimon.workflows.query import WorkflowQuery
+
+if TYPE_CHECKING:
+    from pyarrow import Table
 
 logger = logging.getLogger(__name__)
 
@@ -389,13 +393,40 @@ def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) 
     )
 
 
+def _query_sql(sql_path: Path, input_path: Path) -> "Table":
+    try:
+        import duckdb  # noqa: PLC0415
+    except ImportError as exc:
+        msg = "SQL queries require DuckDB. Use `uv run --extra viz cimon query ...`."
+        raise click.ClickException(msg) from exc
+
+    try:
+        sql = sql_path.read_text(encoding="utf-8")
+        with duckdb.connect(
+            config={"enable_external_access": "false", "python_enable_replacements": "false"},
+        ) as connection:
+            statements = connection.extract_statements(sql)
+            if len(statements) != 1 or statements[0].type != duckdb.StatementType.SELECT:
+                msg = "--sql-file must contain exactly one SELECT query."
+                raise click.UsageError(msg)
+
+            connection.register("source", ds.dataset(input_path, format="parquet"))
+            return connection.execute(statements[0]).to_arrow_table()
+    except (duckdb.Error, OSError, ValueError) as exc:
+        raise click.ClickException(f"SQL query failed: {exc}") from exc
+
+
 @main.command("query")
 @click.argument(
     "spec_paths",
     metavar="SPECS...",
     nargs=-1,
-    required=True,
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+)
+@click.option(
+    "--sql-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    help="Run one DuckDB SELECT query against the input as `source`, instead of using SPECS.",
 )
 @click.option(
     "-i",
@@ -411,7 +442,7 @@ def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) 
     "output_path",
     required=True,
     type=click.Path(dir_okay=False, path_type=Path),
-    help="Where to write the filtered rows as a new Parquet file.",
+    help="Where to write the query result as a new Parquet file.",
 )
 @click.option(
     "-c",
@@ -422,27 +453,41 @@ def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) 
 )
 def query(
     spec_paths: tuple[Path, ...],
+    sql_file: Path | None,
     input_path: Path,
     output_path: Path,
     output_columns: tuple[str, ...],
 ) -> None:
-    """Filter the workflows Parquet cache with one or more declarative spec files into a new Parquet file.
+    """Query the workflows Parquet cache and write the result as a new Parquet file.
 
     SPECS is one or more YAML/JSON files describing a filter (see
     cimon.workflows.query_spec). Given several, all of them must match
-    (AND-combined) for a row to be kept.
+    (AND-combined) for a row to be kept. Use --sql-file instead for SQL.
     """
-    workflow_query = WorkflowQuery(input_path)
-    for spec_path in spec_paths:
-        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-        workflow_query = workflow_query.filter_spec(spec)
-    if output_columns:
-        workflow_query = workflow_query.columns(*output_columns)
+    if sql_file is not None:
+        if spec_paths or output_columns:
+            msg = "--sql-file cannot be combined with SPECS or --column."
+            raise click.UsageError(msg)
+        if output_path.resolve() == input_path.resolve():
+            msg = "--output must be different from --input in SQL mode."
+            raise click.UsageError(msg)
+        table = _query_sql(sql_file, input_path)
+    else:
+        if not spec_paths:
+            msg = "Provide at least one spec file or use --sql-file."
+            raise click.UsageError(msg)
+        workflow_query = WorkflowQuery(input_path)
+        for spec_path in spec_paths:
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+            workflow_query = workflow_query.filter_spec(spec)
+        if output_columns:
+            workflow_query = workflow_query.columns(*output_columns)
+        table = workflow_query.to_table()
 
-    table = workflow_query.to_table()
     write_table_atomic(table, output_path)
 
-    logger.info(f"Wrote {table.num_rows} filtered row(s) to {output_path}")
+    row_kind = "row(s)" if sql_file is not None else "filtered row(s)"
+    logger.info(f"Wrote {table.num_rows} {row_kind} to {output_path}")
 
 
 def _parse_params(raw_params: tuple[str, ...]) -> dict[str, str]:

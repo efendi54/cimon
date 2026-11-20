@@ -258,3 +258,22 @@ be kept:
 ```bash
 cimon query spec-a.yaml spec-b.yaml --input workflows.parquet --output filtered.parquet
 ```
+
+### SQL queries
+
+Use `--sql-file` instead of positional specs for aggregations, calculated columns,
+or sorting. The SQL file must contain one DuckDB `SELECT` query (CTEs are allowed).
+The input Parquet is available as `source`. The result, with the columns and rows
+returned by the query, is written atomically to a separate Parquet file.
+
+```bash
+uv run --extra viz cimon query --sql-file tests/example_specs/merge_group_failures.sql \
+  --input workflows.parquet --output out/merge-group-failures.parquet
+```
+
+The [example query](../../tests/example_specs/merge_group_failures.sql) counts
+failed merge-group jobs per job name, calculates their average duration, and
+sorts by failure count. The SQL mode uses DuckDB from the `viz` extra and
+cannot be combined with spec files or `--column`. Reading other files or URLs
+from SQL is disabled. Run only trusted SQL files: expensive queries can still
+consume significant CPU or memory.

@@ -33,9 +33,24 @@ changes: this can also upgrade dependencies. The changed lockfile applies to
 everyone using the repository; JFrog must be configured and reachable where
 it is used.
 
+### Automatic version bumps
+
+The [version-bump workflow](.github/workflows/version-bump.yml) runs after a
+push to `main`. If there is a `feat`, `fix`, or breaking change since the
+current version tag, it runs the test suite on the checked-out `main` commit,
+including the `viz` extra. Only if the tests pass does Commitizen update the
+version, lockfile and changelog and push the bump commit and `v<version>` tag
+together. Otherwise, or if there are no qualifying commits, no tag is
+created. Concurrent pushes can be included in the same bump.
+
+The workflow requires Actions to have `contents: write` permission and
+permission to push to `main` and create tags. A competing push can cause its
+atomic push to fail; a later workflow run processes the updated `main`.
+It does not create a GitHub Release.
+
 ## Purpose
 
-`cimon` helps to track a repository's GitHub Actions CI over time. Rather than clicking through the
+`cimon` helps to track a repository's GitHub Actions workflow runs over time. Rather than clicking through the
 GitHub Actions UI run by run, it collects workflow-run and job history into a local, queryable cache
 and builds tooling on top of it:
 

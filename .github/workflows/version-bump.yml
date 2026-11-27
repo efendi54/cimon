@@ -1,0 +1,78 @@
+name: Version bump
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump-main
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out latest main and tags
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.11.14"
+
+      - name: Check for release-worthy commits
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_version="$(uv run --locked --only-group dev cz version --project)"
+          current_tag="v${current_version}"
+          if ! git rev-parse --verify --quiet "refs/tags/${current_tag}^{commit}" >/dev/null; then
+            echo "::error::Current version tag ${current_tag} is missing."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$current_tag" HEAD; then
+            echo "::error::Current version tag ${current_tag} is not an ancestor of main."
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse "${current_tag}^{commit}")" ]; then
+            echo "Current main is already tagged ${current_tag}; nothing to bump."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          messages="$(git log --format=%B "${current_tag}..HEAD")"
+          if grep -E '^((feat|fix)(\(.+\))?!?|[[:alnum:]_]+(\(.+\))?!|BREAKING[ -]CHANGE):' <<< "$messages" >/dev/null; then
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No feat, fix, or breaking change since ${current_tag}; nothing to bump."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        if: steps.changes.outputs.bump == 'true'
+        run: uv run --locked --group test --extra viz pytest --random-order-bucket=global -n auto
+
+      - name: Bump version and push commit and tag
+        if: steps.changes.outputs.bump == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv run --locked --only-group dev cz bump --yes
+          new_version="$(uv run --locked --only-group dev cz version --project)"
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/v${new_version}:refs/tags/v${new_version}"

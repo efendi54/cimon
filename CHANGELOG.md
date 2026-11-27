@@ -1,3 +1,9 @@
+## v0.2.0 (2026-11-27)
+
+### Feat
+
+- introduce pypi to be default index for dependency resolution (give hints how to switch to alternatives)
+
 ## v0.1.0 (2026-11-27)
 
 ### Feat

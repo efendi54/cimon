@@ -21,6 +21,15 @@ wheels = [
 ]
 
 [[package]]
+name = "argcomplete"
+version = "3.7.2"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/87/6f/5a73f04007ca950701765949209f068da628bd11f9c2da287278ce91e0ee/argcomplete-3.7.2.tar.gz", hash = "sha256:aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/46/bd/551ee6af426af84ca33e02622be722925c196608e9127d731ef17c47f06e/argcomplete-3.7.2-py3-none-any.whl", hash = "sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19" },
+]
+
+[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
@@ -206,6 +215,9 @@ viz = [
 ]
 
 [package.dev-dependencies]
+dev = [
+    { name = "commitizen" },
+]
 docs = [
     { name = "mike" },
     { name = "mkdocs-material" },
@@ -237,7 +249,7 @@ requires-dist = [
 provides-extras = ["viz"]
 
 [package.metadata.requires-dev]
-dev = []
+dev = [{ name = "commitizen", specifier = ">=4.20.1" }]
 docs = [
     { name = "mike", specifier = "~=2.2.0" },
     { name = "mkdocs-material", specifier = "~=9.7.0" },
@@ -272,6 +284,31 @@ source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote
 sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44" }
 wheels = [
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6" },
+]
+
+[[package]]
+name = "commitizen"
+version = "4.20.1"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+dependencies = [
+    { name = "argcomplete" },
+    { name = "charset-normalizer" },
+    { name = "colorama" },
+    { name = "decli" },
+    { name = "deprecated", version = "1.3.1", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "deprecated", version = "3.0.1", source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "jinja2" },
+    { name = "packaging" },
+    { name = "prompt-toolkit" },
+    { name = "pyyaml" },
+    { name = "questionary" },
+    { name = "termcolor" },
+    { name = "tomlkit" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/66/fa/17c417067f178119ebf6325155a0f3ff65e67407e32b375ea08cfa8ca22c/commitizen-4.20.1.tar.gz", hash = "sha256:352833227ae3a34e5f892e94cc9499737b3d0f1ca985353340946fb470ced7bd" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/a3/b1/dfceab56ee49447280770be58f427de659432dd12ebd143649ba8aaf5a98/commitizen-4.20.1-py3-none-any.whl", hash = "sha256:47412baf5614445e733a1339573977e057c94327a735dd9bb7b1046937ae0ca9" },
 ]
 
 [[package]]
@@ -418,6 +455,50 @@ wheels = [
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/3b/f2/5a72274ca9f1b2a8b44a662ee0bf1b435909deb473d6f97bcd035bcdbc71/cryptography-48.0.0-pp311-pypy311_pp73-manylinux_2_34_aarch64.whl", hash = "sha256:ecde28a596bead48b0cfd2a1b4416c3d43074c2d785e3a398d7ec1fc4d0f7fbb" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/b4/e1/48cedb2fe63626e91ded1edad159e2a4fb8b6906c4425eb7749673077ce7/cryptography-48.0.0-pp311-pypy311_pp73-manylinux_2_34_x86_64.whl", hash = "sha256:4defde8685ae324a9eb9d818717e93b4638ef67070ac9bc15b8ca85f63048355" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/a2/ca/7e8365deec19afb2b2c7be7c1c0aa8f99633b54e90c570999acda93260fc/cryptography-48.0.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:db63bf618e5dea46c07de12e900fe1cdd2541e6dc9dbae772a70b7d4d4765f6a" },
+]
+
+[[package]]
+name = "decli"
+version = "0.6.3"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/0c/59/d4ffff1dee2c8f6f2dd8f87010962e60f7b7847504d765c91ede5a466730/decli-0.6.3.tar.gz", hash = "sha256:87f9d39361adf7f16b9ca6e3b614badf7519da13092f2db3c80ca223c53c7656" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/d8/fa/ec878c28bc7f65b77e7e17af3522c9948a9711b9fa7fc4c5e3140a7e3578/decli-0.6.3-py3-none-any.whl", hash = "sha256:5152347c7bb8e3114ad65db719e5709b28d7f7f45bdb709f70167925e55640f3" },
+]
+
+[[package]]
+name = "deprecated"
+version = "1.3.1"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+resolution-markers = [
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.11'",
+]
+dependencies = [
+    { name = "wrapt", marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/49/85/12f0a49a7c4ffb70572b6c2ef13c90c88fd190debda93b23f026b25f9634/deprecated-1.3.1.tar.gz", hash = "sha256:b1b50e0ff0c1fddaa5708a2c6b0a6588bb09b892825ab2b214ac9ea9d92a5223" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/84/d0/205d54408c08b13550c733c4b85429e7ead111c7f0014309637425520a9a/deprecated-1.3.1-py2.py3-none-any.whl", hash = "sha256:597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f" },
+]
+
+[[package]]
+name = "deprecated"
+version = "3.0.1"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+]
+dependencies = [
+    { name = "wrapt", marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/61/46/f6958cdfa8a801fc845e981a8a958dba2e74a386b026a8fd5cae58423f1f/deprecated-3.0.1.tar.gz", hash = "sha256:2f5a9fecc9961e26462846cf1e57f73a612b1d0b79c27dceeed8de647beadcee" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/82/f0/07de837adfa09d592747b82fd74316e88285d2d7057551f30e4b5ef81bd8/deprecated-3.0.1-py3-none-any.whl", hash = "sha256:eda314c115e8bc0fe52b90a6869e19240ac3cedb7449adfdba5981cf9ef693e1" },
 ]
 
 [[package]]
@@ -1137,6 +1218,18 @@ wheels = [
 ]
 
 [[package]]
+name = "prompt-toolkit"
+version = "3.0.53"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+dependencies = [
+    { name = "wcwidth" },
+]
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz", hash = "sha256:9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl", hash = "sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2" },
+]
+
+[[package]]
 name = "properdocs"
 version = "1.6.7"
 source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
@@ -1541,6 +1634,18 @@ wheels = [
 ]
 
 [[package]]
+name = "questionary"
+version = "2.1.1"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+dependencies = [
+    { name = "prompt-toolkit" },
+]
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f6/45/eafb0bba0f9988f6a2520f9ca2df2c82ddfa8d67c95d6625452e97b204a5/questionary-2.1.1.tar.gz", hash = "sha256:3d7e980292bb0107abaa79c68dd3eee3c561b83a0f89ae482860b181c8bd412d" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/3c/26/1062c7ec1b053db9e499b4d2d5bc231743201b74051c973dadeac80a8f43/questionary-2.1.1-py3-none-any.whl", hash = "sha256:a51af13f345f1cdea62347589fbb6df3b290306ab8930713bfae4d475a7d4a59" },
+]
+
+[[package]]
 name = "requests"
 version = "2.34.1"
 source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
@@ -1575,6 +1680,15 @@ source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote
 sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81" }
 wheels = [
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274" },
+]
+
+[[package]]
+name = "termcolor"
+version = "3.3.0"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/46/79/cf31d7a93a8fdc6aa0fbb665be84426a8c5a557d9240b6239e9e11e35fc5/termcolor-3.3.0.tar.gz", hash = "sha256:348871ca648ec6a9a983a13ab626c0acce02f515b9e1983332b17af7979521c5" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/33/d1/8bb87d21e9aeb323cc03034f5eaf2c8f69841e40e4853c2627edf8111ed3/termcolor-3.3.0-py3-none-any.whl", hash = "sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5" },
 ]
 
 [[package]]
@@ -1628,6 +1742,15 @@ wheels = [
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/6a/1e/71dfd96bcc1c775420cb8befe7a9d35f2e5b1309798f009dca17b7708c1e/tomli-2.4.1-cp313-cp313-win_amd64.whl", hash = "sha256:8d65a2fbf9d2f8352685bc1364177ee3923d6baf5e7f43ea4959d7d8bc326a36" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/83/7a/d34f422a021d62420b78f5c538e5b102f62bea616d1d75a13f0a88acb04a/tomli-2.4.1-cp313-cp313-win_arm64.whl", hash = "sha256:4b605484e43cdc43f0954ddae319fb75f04cc10dd80d830540060ee7cd0243cd" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/7b/61/cceae43728b7de99d9b847560c262873a1f6c98202171fd5ed62640b494b/tomli-2.4.1-py3-none-any.whl", hash = "sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe" },
+]
+
+[[package]]
+name = "tomlkit"
+version = "0.15.3"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/c9/85/4a7c68111c057a6498f5bc721ef93b388b420bb31d7020759f18a5f0c2ec/tomlkit-0.15.3.tar.gz", hash = "sha256:b3c3020ec1a4bd469d12e31fb4da938e7f6ba758cdbec3fd9047db63120eaf81" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/c3/49/6b0a22e69c844c0b18cb66c206bdd791693d0cf845badc5f84e6448f2192/tomlkit-0.15.3-py3-none-any.whl", hash = "sha256:a83ce6de3b648e68dd9b50aabadad749ba823eb58b1d026f3c0a283c4767a9c1" },
 ]
 
 [[package]]
@@ -1717,4 +1840,77 @@ wheels = [
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/07/f6/d0e5b343768e8bcb4cda79f0f2f55051bf26177ecd5651f84c07567461cf/watchdog-6.0.0-py3-none-win32.whl", hash = "sha256:07df1fdd701c5d4c8e55ef6cf55b8f0120fe1aef7ef39a1c6fc6bc2e606d517a" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/db/d9/c495884c6e548fce18a8f40568ff120bc3a4b7b99813081c8ac0c936fa64/watchdog-6.0.0-py3-none-win_amd64.whl", hash = "sha256:cbafb470cf848d93b5d013e2ecb245d4aa1c8fd0504e863ccefa32445359d680" },
     { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/33/e8/e40370e6d74ddba47f002a32919d91310d6074130fe4e17dabcafc15cbf1/watchdog-6.0.0-py3-none-win_ia64.whl", hash = "sha256:a1914259fa9e1454315171103c6a30961236f508b9b623eae470268bbcc6a22f" },
+]
+
+[[package]]
+name = "wcwidth"
+version = "0.9.5"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/8e/da/d59374b2c893ae70a41fdb064637ccef218f25df8c67e5431a96708235d9/wcwidth-0.9.5.tar.gz", hash = "sha256:713534e2ecb16e0fc39f19e0a5dda997da76d010953e9e8f803e7971f8accd80" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/e7/37/3fd79ed60a52d3bef465abf826af97159b10ca0be16d5ad9f1dce3113fe2/wcwidth-0.9.5-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:020031ef4b8d11c8f3247103b9fb9ea5adea7474ed2bb0a3beeb1633c6ab00e6" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/34/65/12f5f1afd3bb6a2ac4b56ee71b43ac18d384f348daf2e20ede7b335a5a19/wcwidth-0.9.5-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:a7e0ccc62c7171a8f6b47f7127559e8d9fbfa36d36dfffefb409655dd669717d" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/64/d5/783fd51c04352a13fdf41bf4697bca5dd13cd41d6bdd55d0240a360a0245/wcwidth-0.9.5-cp310-abi3-manylinux1_i686.manylinux2014_i686.manylinux_2_17_i686.manylinux_2_5_i686.whl", hash = "sha256:34964815cfb6e11bc1600d0c7e1ae483c8377b88717c2e7f86f243033e10e2ee" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/ba/17/6631bfa4d7666441d86053c58c208388e8f2c4bc28bbd96ba03f90a424b4/wcwidth-0.9.5-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:a631629c8a131f7fa58c99bc0630f7011bcdc385146b1ebac9d74becba2b6a90" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/5a/cb/55c50713af3697d7dc88b99763826e77ac1e5cec515670c9400a6dee980e/wcwidth-0.9.5-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:61ffb194ccf2224ff552b46912aa44f1bc841f8ef751b193335b317a286b7c03" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/da/b2/11139a4480a93b7e53f14ad56762fc2c2a118a417bf55f78d6213bb4cf75/wcwidth-0.9.5-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6ac35755bb1748b2e36f9ea758e90da251824d530b5fe46fb7a68b9d1ba2d985" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/8f/8d/c492d7b241367fa2afbd4efae756d4a08c12f0d5488b3c4e7b5c4a906eb0/wcwidth-0.9.5-cp310-abi3-musllinux_1_2_i686.whl", hash = "sha256:ff7b3f3d69c38a45840349ad8d33e61d7ebaf0f2cd74b659f8baf5660d807f39" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f1/e2/19ae4d788ad8f92c4ef728fe6b83dffb30c8d1b3f1f209ed1e5c44563414/wcwidth-0.9.5-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:76523d4013b1373b74654b19f4c68ce2af2deb00bacdd7ef497403eeeaff2ec6" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/ce/2b/312011b7e5eb898be73a303caef289a3313cfabfdc9c608e266695440065/wcwidth-0.9.5-cp310-abi3-win32.whl", hash = "sha256:f94b1c6d1252013826756c395279738d75386a7a06b3262900ac7c2719fafed4" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/4c/f8/f192d5bb1ef6d373ab68e6797480bdc07f43650b8badecf61b96f046b598/wcwidth-0.9.5-cp310-abi3-win_amd64.whl", hash = "sha256:83392b339571c9f1161a360079229c65099c96801433fb71757ab183ce9742b0" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/32/ad/86a58e07dfa0aa7814702c144fd4ac2c5449e561c31a2161e2f3979f0fcd/wcwidth-0.9.5-cp310-abi3-win_arm64.whl", hash = "sha256:775076a8da66a9cea8e135331800ee2aa579d6898c23745ab7f19d1d637388e6" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/ca/77/61587cff9534a911b3116009f42de1edb2fa12bbb7c45ca92c4a415993f1/wcwidth-0.9.5-py3-none-any.whl", hash = "sha256:ef205150ff317032d633de2d8ca26d03dc8d5ba6a00294f6acfd1d0cfe1365d6" },
+]
+
+[[package]]
+name = "wrapt"
+version = "2.5.2"
+source = { registry = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/simple" }
+sdist = { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/9c/b0/f752d19e1e83ab8bd64aeccfde32ff086aee3ef08520f7340b69a8d0a4d2/wrapt-2.5.2.tar.gz", hash = "sha256:551cb49e88b3722faad780303833bc4fa70685fb1773270fb98b40d39d9fddbf" }
+wheels = [
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/5b/fe/9ae2a8711f49db40f18bc0276dc869594007073b55c4066adb10ac07db6a/wrapt-2.5.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:9c0e0342eba94829491985516e951d1b6a2de402ae4a44d1ea0debbd929cb7a9" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/d9/3a/54a07e3b5c30c95a05118eebc676f9f4a545fdd71c085c87c3664d834d6c/wrapt-2.5.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:244d57e361833389278820e5242f4a364305f633572d9500d3a85f40417aefee" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/56/d0/ea2284532f0b6f1dae5740b353c94a19717ee586ca366cc2e5e0b301aaf4/wrapt-2.5.2-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:0fa61d2f1033039aa47f8f1b4e076ca3c9d0fc08e448c4b1bd06d8b59da89cbf" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/48/3a/0117858feaf12f0054998e176d27e3181dd412a384dd24cbbfe338a777cb/wrapt-2.5.2-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:51465dcbab69d9c02e8ca943befa1eabc37ccb07f9335c240d78a78330285a2d" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/c9/01/89d2a8048cf1cda688c4106d9a60de048d930d85fa5157b828fc0086340e/wrapt-2.5.2-cp310-cp310-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:d5322e78248f6079f6525f0a9476750112750ea0a3f3fca13fd5f18a1c864d3b" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/0d/27/afd9a9e4aa185c8b444858d940294c157cbf42e20e0a530f12594a07ce32/wrapt-2.5.2-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:90dad90c8a74293d2cb3ed225760a8c8f20009522efe519d6380f5de7f5caece" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/20/3c/d50aa957f8f0ecbfd3121b2360f2ec0238fe570e6e41574fde5bdc79c48b/wrapt-2.5.2-cp310-cp310-musllinux_1_2_riscv64.whl", hash = "sha256:f00c726586871c22f542df6d5ce57a81e60e9339e4d40bcc7d7d5c6130db3cce" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/43/6d/ff3af2781e501a640f1b38a544c2353d8b6c4bf4e66e9832ef30f702bce9/wrapt-2.5.2-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:b528eb5dbf54cf9c3e9b9c5b1680e0f4965eb8750ae738f43dd14d1bc332fa42" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/75/0e/8b6e95a9cd76dcad49c22272fc3593b0fea40beed765a022cb98d58c922a/wrapt-2.5.2-cp310-cp310-win32.whl", hash = "sha256:80eec154f8ce6d26a553481772f111a064091b7e37700c690e0024921d57c569" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/8a/01/fee1502db80770d388c1d17350e8c6821a955adbbef660228dbcea8ad68c/wrapt-2.5.2-cp310-cp310-win_amd64.whl", hash = "sha256:f01f56a6ddffd89179bf0424c3b5bbd187690cfa2f972472aa2d563a4e0a7fdb" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/48/cb/08ee6d9df616b393e40ce0c4513e6c9f5c05b90b9cd2084ee268dc3662e6/wrapt-2.5.2-cp310-cp310-win_arm64.whl", hash = "sha256:550a597a9c0510fb8bd79864025225f4fc51717adb617191561295565337f068" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/4d/c2/b4bbaabf73ea9ccc2e322a11455a95d7d9dcae5bbcc6fd836c5f676a082f/wrapt-2.5.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:8b240a879405591da10e2d20c2d1ad29b978d40ec37e24801296cfee1d4c04f9" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f7/d4/57db9384ffb339f29b6712cc1d7d4ace29d07670756becf9ad336728ca42/wrapt-2.5.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:b632d90ac0d04e3ba8821b19954d6c36ea8f714b75db53c58015025fefccb1ac" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/98/00/a0effd5872aed3271b28b4740a71bc2d7406d33b4e03eac01ae099ac8569/wrapt-2.5.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:0743950d3dda9940e56f81f5334ba051c4fe2e1421e4e4a4ef8eb8fb86a90894" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/69/22/8e9ef3a15115f3cc01f2460aaf9aeb04819704fefd218086642c7182be95/wrapt-2.5.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:594c6d10b9cfb951a09f7338531a41d31194e7eee9dee206c0a8992421682719" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/15/7f/b2912f3d045fd9a5f30d9d58f3b4df8921c87e902524a32d7eb0e0e315cb/wrapt-2.5.2-cp311-cp311-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:e4362b3b4e4b050b8f1f518e0c71a09f2e938a9f62ee559ea1743a13b3c9e8f1" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/ab/06/cdd488014d5010b052fdd9c368d8598accd9eee766d98e698cc8510b364d/wrapt-2.5.2-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:81e685c7662fab9958a852b9c86f3b5b8eee45d047a2766d6c23b63ad1eee423" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/dd/b9/6605b2fd612ea1635d0a7cebbdc05cdb59c97a07ee9c418a5f43a49cee53/wrapt-2.5.2-cp311-cp311-musllinux_1_2_riscv64.whl", hash = "sha256:c6b4bd8c662c333518a9aedb35bb9f4f7d1584fbef4bc1507a6c6a47357c628e" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/42/9b/6a8acfd407991b50b9bdbaaae5551cc12ba487a8a0973c87793dac621f1f/wrapt-2.5.2-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:7a7efde469ad904b8e05f98c76d63b437f4756c30ec7b9136bef02bdb5d1b14c" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/81/6c/9a975e802393c74af9879ca938b298a00fd59074ee90abf4ec4bedcdd109/wrapt-2.5.2-cp311-cp311-win32.whl", hash = "sha256:73d432588d1e0a8fcb88d46ef2733e848ff0c3e14111a0420c77199fd2a8cd30" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/46/aa/196ab4e3584e547fcb6c4a622934aae14077c367b86f57a5ab5e76a47203/wrapt-2.5.2-cp311-cp311-win_amd64.whl", hash = "sha256:04703a2a4eea122c3a6b3af89e72bbbaa20779e5c7199c3d06e3fcb6601bc7d4" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/e0/5d/7a699446d344bc74bcd607a0cf09087285a253eefc6449048c0df7b5a3e5/wrapt-2.5.2-cp311-cp311-win_arm64.whl", hash = "sha256:53cf804402d49fa2c920a90dfab971a82bca67fb43e54adc7c3b24c054485b4d" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/4b/fe/9ccae0a147d0732397f54ff232b1a0da148a4099f17c1b156b9d3e79127e/wrapt-2.5.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:bec3b6b1ae2f7ed763fb0ba1776b9b5f11283e6ff40c9cbe3a855ea652c326cf" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/d5/ca/a61d994df49fa422abd859e525e04b95ef2888e3818a0f451aa7d4d3527f/wrapt-2.5.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e57d79e3338b3cecee1dd80d6ef8f945f8ea7b92f0d8d5591f840ffa0afc14dc" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/dd/26/a6caa9a84ef5db4a273787949cea7ab51f6001d2548768af4c8e3c49debd/wrapt-2.5.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:092472b7b1494deef40dac5e9f6295013a9d51b112b5fbc4350f64dc2574e46a" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/c7/28/2189571e711ab31cb7f682c739d05f033ae0e83e12eb4d5d21473ca2cd1a/wrapt-2.5.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d108bd98ab2c5ccbf55cf2154e0a73341df930030df2e01ee35d71a44a99d3ad" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/80/8e/46a6cc2e8215df7fae292178a355df729547ff9b912686823201d38be269/wrapt-2.5.2-cp312-cp312-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:858511731d6ede4217960c5fecdb5ecbf90e306dfd93b837395658d61374a498" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/97/38/dff531d0125fe880e05fe5fcb89f144d25ffbe95aa9a2c50539eabde7567/wrapt-2.5.2-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:3b6885250b809532a634acd56e360d57c201c1cdc75cbf2b5e106241ece6cbc3" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f0/5b/f4a78df4c52175d53ff095f2f5a54206a2d16e542b1dd2cdcaed901fe432/wrapt-2.5.2-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:c60a5cd8b7b510056f2643d94f1c144533a568ade2891a9dd35733f5e0055777" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/20/6f/8eab144c717300f76f1337ba58091f4de5da0f4d772727c9f41135b325c1/wrapt-2.5.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:40e03506f09dbf4854fd69848e843dadd9b7fbbdd217837cb27b37fb8f0b5bc3" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/59/1a/98e278ef2f8952a34f847a91f75899f6385762b07577c51a5ef82c768dfb/wrapt-2.5.2-cp312-cp312-win32.whl", hash = "sha256:ac00ba7d22d55d3c8d085005ce4942ff3bb118d480f889b5984f1d3454052917" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/7d/0a/ab645f8b4c594cac2db49bbc805bff97a9d3f2944061b865f67e0351b6c8/wrapt-2.5.2-cp312-cp312-win_amd64.whl", hash = "sha256:36021ef761856bdbc10d5f3da9a95af93ef60d6acf9c72c8f849937ba2b902aa" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/37/1e/232868b68b925ab29ca5acbec4ad54ee42a853fcd8f596bf7e0e0e3850f1/wrapt-2.5.2-cp312-cp312-win_arm64.whl", hash = "sha256:81bdf0bd141d9b1706a0751b2ee068c7afe6be4042712d427b32b3072d5c40b9" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/1b/7a/38f08a89ca8faa9b788a857f109b5e4cd1f25671a5157e2218072f64aa76/wrapt-2.5.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:88f982c2bb306732271aa15cded4002ce28b5d9023de9d11e927da4dcf65e441" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/e9/8b/2fb9b2522b7e1e7534a72fec0040bbf3d273129ec0a98316e7d37b09aa35/wrapt-2.5.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:269321b17467a10997cc6e14793bf1816e6ce488f9711c74b72552466d206739" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/c2/1e/770d73e0cc82a41602cb2cb184769c28bdbaa9b998944d577a1097c18da3/wrapt-2.5.2-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:8b039b3a296762db1908d6108365225393c4fb33c1dbc5f00aa36f8302eaeaa0" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/ac/2b/b4362e803d870451b5e701df5e30ded2d6fb1d9e0c01eec4dc7fa8332b57/wrapt-2.5.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e1af6136ac5bcfab17190a70b25d8437eb8d8f9ca2b821a0655d39275a8cb7e7" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/87/15/244dbd2d86285857898be5f7632e8375161953e645f250ac9778c058ab9b/wrapt-2.5.2-cp313-cp313-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:9d4e1cdf2efdc7181c8177f6090886e22278e70f7257df12863d2f52a9dcbbd7" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/62/0e/15ae5812d510fbfb65acb3a63aecbd8ffb4b944b2fd0131d968e31df89d6/wrapt-2.5.2-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:e33578755e07edf3a70df3241f4cf376dad507e2cc73e737311bb00b5067f4d7" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f6/c2/e611b881c05f7f2a5c88f9d89236afb091b8adba3ac89ff9040b6a837be4/wrapt-2.5.2-cp313-cp313-musllinux_1_2_riscv64.whl", hash = "sha256:2bf23cde96e0f771a6a2c68973c1ded45c9707f8bd519ede30ecf075f3c720f6" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/f3/f4/bdb253208ec907097809e34c25d199cd66686a7974257e08b57d96e3176c/wrapt-2.5.2-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:eff91af619ad5d587f8855f6c02164e12d33d205c702eb73d487deb499520265" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/67/86/74205217834201f27bc73a76b4db67f488fd07787e12a045fb2b39f09c29/wrapt-2.5.2-cp313-cp313-win32.whl", hash = "sha256:11655df8e17658a67628cdc97fe95d6b263e023213cf18067f21e5ec0b0285f3" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/e0/56/7c732aed39116853d74485b4431a0ea37b05bd2bf250bdddc55ceb64f8c0/wrapt-2.5.2-cp313-cp313-win_amd64.whl", hash = "sha256:5726faa7342ba473041bc1a276486d232b42e3927d35427729b266b1b5ecaa42" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/0c/a7/c4f7ae891bbfef566aa63effe846f6804dac4c0461601993f4c59deaf955/wrapt-2.5.2-cp313-cp313-win_arm64.whl", hash = "sha256:e1fb4af8aac3573770ed3e64efc39d953342b12bcb6e6479512a945eb5557523" },
+    { url = "https://jfrog.hub.vwgroup.com/artifactory/api/pypi/remote-pypi/packages/packages/77/8b/1ea57b936b70f98e8e7620a352578096d778dbee95b262f73c066d210ffb/wrapt-2.5.2-py3-none-any.whl", hash = "sha256:61eb54e9540ea522c2c4752a57549a83d3c67e6704ed708403d28e067aaf90f0" },
 ]

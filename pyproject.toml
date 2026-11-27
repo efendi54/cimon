@@ -47,6 +47,12 @@ docs = [
     "mkdocs-same-dir~=0.1.0",
 ]
 
+# Comment out this entire block to prefer indexes from the user/system uv config,
+# e.g. JFrog. Existing lockfile URLs remain unchanged; see README for switching.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "0.0.3"

@@ -16,6 +16,23 @@ Small CLI tool for tracking github action workflow runs related data.
 The [DuckDB Sidekick](https://marketplace.visualstudio.com/items?itemName=PrasertKana.duckdb-sidekick&utm_source=chatgpt.com)
 VS Code extension is optional and useful for inspecting Parquet files.
 
+### Dependency Resolution
+
+The project prioritizes [PyPI](https://pypi.org/simple) for dependency
+resolution, and `uv.lock` records the resolved package sources. uv also merges
+user and system configuration: additional indexes configured there can still
+be consulted as fallbacks. Environment variables and command-line options can
+override project settings.
+
+To prefer a JFrog index configured in your user or system uv configuration,
+comment out the entire `[[tool.uv.index]]` PyPI block in `pyproject.toml`.
+To switch back, uncomment it. This changes resolution priority, but existing
+`uv.lock` entries still point to their original sources. To update the
+lockfile, run `uv lock --upgrade`, then review the resulting source and version
+changes: this can also upgrade dependencies. The changed lockfile applies to
+everyone using the repository; JFrog must be configured and reachable where
+it is used.
+
 ## Purpose
 
 `cimon` helps to track a repository's GitHub Actions CI over time. Rather than clicking through the

@@ -10,8 +10,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import yaml
-from cimon.__main__ import main
 from click.testing import CliRunner
+
+from cimon.__main__ import main
 
 from tests.workflows.test_query import _write_sample
 
@@ -173,5 +174,5 @@ def test_query_sql_rejects_column_option(tmp_path: Path) -> None:
 
     result = _run_sql(tmp_path, "SELECT * FROM source", "--column", "job_name")
 
-    assert result.exit_code == 2
+    assert result.exit_code == 2  # noqa: PLR2004
     assert "cannot be combined with SPECS or --column" in result.output

@@ -7,6 +7,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+
 from cimon.workflows import build_metrics
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ def test_process_job_run_fetches_job_info_when_nothing_is_cached(
 
     assert builds == []
     assert job_info["job_name"] == "Build"
-    assert job_info["job_active_duration_sec"] == 42.0
+    assert job_info["job_active_duration_sec"] == 42.0  # noqa: PLR2004
     assert job_info_calls == ["1"]
     assert auth_calls == ["github.com"]
 
@@ -95,7 +96,7 @@ def test_process_job_run_reuses_cached_log_and_job_info(
 
     assert builds == []
     assert job_info["job_name"] == "Build"
-    assert job_info["job_active_duration_sec"] == 42.0
+    assert job_info["job_active_duration_sec"] == 42.0  # noqa: PLR2004
     assert job_info_calls == []
     assert auth_calls == []
 

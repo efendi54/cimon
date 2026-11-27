@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
-import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import requests
 
@@ -45,7 +44,6 @@ from cimon.workflows.models import (
     WorkflowCache,
     WorkflowInfo,
 )
-from cimon.workflows.query import WorkflowQuery
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping
@@ -221,7 +219,7 @@ def iter_runs_by_status(
     context = f"workflow {workflow_id} runs with status={status}"
 
     yield from _iter_run_pages(
-        session, url, {"status": status}, max_pages, etag_cache, context
+        session, url, {"status": status}, max_pages, etag_cache, context,
     )
 
 
@@ -305,7 +303,7 @@ def fetch_run_attempt_info(
     return RunAttemptInfo(
         run_attempt=run_attempt,
         workflow_run_url=workflow_run_attempt_url(
-            host, owner, repo, run_id, run_attempt
+            host, owner, repo, run_id, run_attempt,
         ),
         workflow_status=attempt["status"],
         workflow_conclusion=attempt["conclusion"],
@@ -572,7 +570,7 @@ def cache_to_parquet_rows(data: WorkflowCache) -> list[dict[str, Any]]:
                     "job_completed_at": job.completed_at,
                     "job_duration_sec": job.duration_sec,
                     "job_active_duration_sec": calculate_job_active_duration_in_seconds(
-                        job, run.cache_updated_at
+                        job, run.cache_updated_at,
                     ),
                     "job_status": job.status,
                     "job_conclusion": job.conclusion,
@@ -677,16 +675,16 @@ def log_parquet_cache_overview(path: str) -> None:
 
     for workflow_file, info in sorted(overview.items()):
         logger.info(
-            f"      {workflow_file} ({sum(info['status_counts'].values())} RUNS)"
+            f"      {workflow_file} ({sum(info['status_counts'].values())} RUNS)",
         )
         logger.debug(
-            f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}"
+            f"          created_at range:    {info['oldest_created_at']} .. {info['newest_created_at']}",
         )
         logger.debug(
-            f"          workflow_status:     {_format_counts(info['status_counts'])}"
+            f"          workflow_status:     {_format_counts(info['status_counts'])}",
         )
         logger.debug(
-            f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}"
+            f"          workflow_conclusion: {_format_counts(info['conclusion_counts'])}",
         )
 
 
@@ -758,7 +756,7 @@ def cached_data_from_parquet(
                 # being copied forward forever by the "terminal jobs are
                 # immutable" cache-reuse path.
                 duration_sec=_duration_seconds(
-                    row.get("job_started_at"), row.get("job_completed_at")
+                    row.get("job_started_at"), row.get("job_completed_at"),
                 ),
                 status=row.get("job_status"),
                 conclusion=row.get("job_conclusion"),
@@ -840,7 +838,7 @@ def repair_job_durations(path: str) -> int:
 
     for row in rows:
         duration = _duration_seconds(
-            row.get("job_started_at"), row.get("job_completed_at")
+            row.get("job_started_at"), row.get("job_completed_at"),
         )
         if duration != row.get("job_duration_sec"):
             row["job_duration_sec"] = duration
@@ -1005,7 +1003,7 @@ def fetch_jobs(
     return [
         create_job_cache_entry(job)
         for job in iter_jobs(
-            session, base_url, owner, repo, run_id, etag_cache=etag_cache
+            session, base_url, owner, repo, run_id, etag_cache=etag_cache,
         )
     ]
 
@@ -1190,7 +1188,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Abort the sync as soon as the remaining GitHub API quota drops "
         "to/below this value (e.g. 200), instead of running until the API "
         f"itself starts rejecting requests. Defaults to {DEFAULT_QUOTA_LIMIT_FRACTION:.0%}".replace(
-            "%", "%%"
+            "%", "%%",
         )
         + " of the token's actual rate limit ceiling if not given.",
     )
@@ -1655,7 +1653,7 @@ def sync_workflow(  # noqa: C901, PLR0912, PLR0915
 
     logger.info("Cache update completed.")
     logger.info(
-        f"ETag cache:   {etag_cache_file} ({format_file_size(etag_cache_file)})"
+        f"ETag cache:   {etag_cache_file} ({format_file_size(etag_cache_file)})",
     )
     logger.info(f"GH Response:  {response_file} ({format_file_size(response_file)})")
     logger.info(f"    Runs:     {len(runs)} ({new_runs} new, {known_runs} known)")
@@ -1669,25 +1667,6 @@ def sync_workflow(  # noqa: C901, PLR0912, PLR0915
             quota_exceeded,
         )
         raise quota_exceeded
-
-    # def test_query(parquet_file: Path) -> None:
-
-    #     table = (
-    #         WorkflowQuery(parquet_file)
-    #         .job_name("Check Changed Files")
-    #         .job_conclusion("success")
-    #         .created_between("2026-08-26T00:00:00Z", "2026-08-31T23:59:59Z")
-    #         .filter(ds.field("job_duration_sec") > 3)      # nur "lange" Builds
-    #         .columns("run_id", "job_duration_sec", "job_runner_name")
-    #         .to_table()
-    #     )
-
-    #     df = table.to_pandas()               # z.B. für Plots
-    #     avg_duration = df["job_duration_sec"].mean()
-    #     logger.info(f"Average job duration for 'Check Changed Files' jobs in August 2026: {avg_duration}")
-
-    # test_query(parquet_file)
-
 
 if __name__ == "__main__":
     try:

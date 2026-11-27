@@ -99,7 +99,7 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
         )
     except subprocess.CalledProcessError as exc:
         logger.warning(
-            f"{progress} Skipping {job_url}: failed to download its log ({exc})"
+            f"{progress} Skipping {job_url}: failed to download its log ({exc})",
         )
         # download_job_log() leaves an empty/partial file behind on failure.
         (logs_dir / f"{info['job_id']}.log").unlink(missing_ok=True)

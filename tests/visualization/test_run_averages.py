@@ -1,4 +1,4 @@
-# ruff: noqa: D103, PLR2004
+# ruff: noqa: CPY001, D103, PLR2004
 """Batch selection, duration statistics and HTML output regression tests."""
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from click.testing import CliRunner
+
 from cimon.__main__ import main
 from cimon.visualization.renderers.run_averages import (
     average_figure,
@@ -16,7 +18,6 @@ from cimon.visualization.renderers.run_averages import (
     select_attempts,
 )
 from cimon.workflows.run_url import parse_workflow_run_url
-from click.testing import CliRunner
 
 from tests.visualization.test_workflow_job_durations import RUN_URL, _job, _write_cache
 
@@ -54,7 +55,7 @@ def _selection(tmp_path: Path, urls: list[str | None]) -> str:
                     and (ref.attempt is None or row["run_attempt"] == ref.attempt)
                 ]
         selected.extend(
-            [{**row, "workflow_run_url": url} for row in (matches or rows[:1])]
+            [{**row, "workflow_run_url": url} for row in (matches or rows[:1])],
         )
     table = (
         pa.Table.from_pylist(selected, schema=cache.schema)
@@ -78,13 +79,13 @@ def _completed(run_id: str, *, attempt: int = 1) -> dict[str, object]:
 
 @pytest.mark.parametrize("individual", [True, False])
 def test_batch_writes_summary_and_optional_individual_pages(
-    tmp_path: Path, *, individual: bool
+    tmp_path: Path, *, individual: bool,
 ) -> None:
     """Repeated URLs do not multiply samples or per-run output."""
     _write_cache(tmp_path / "cache", [_completed("100"), _completed("200")])
     selection = _selection(tmp_path, [RUN_URL, RUN_URL, RUN_URL.replace("100", "200")])
     result = _visualize(
-        tmp_path, "-p", selection, "-p", f"individual-html={str(individual).lower()}"
+        tmp_path, "-p", selection, "-p", f"individual-html={str(individual).lower()}",
     )
 
     assert result.exit_code == 0, (result.output, result.exception)
@@ -120,10 +121,10 @@ def test_batch_defaults_to_individual_pages(tmp_path: Path) -> None:
 def test_selection_resolves_latest_explicit_and_overlapping_attempts() -> None:
     """A base URL and its latest explicit attempt count once; older explicit attempts remain selected."""
     table = pa.Table.from_pylist(
-        [_completed("100"), _completed("100", attempt=2), _completed("200")]
+        [_completed("100"), _completed("100", attempt=2), _completed("200")],
     )
     selected = select_attempts(
-        table, [RUN_URL, f"{RUN_URL}/attempts/2", f"{RUN_URL}/attempts/1"]
+        table, [RUN_URL, f"{RUN_URL}/attempts/2", f"{RUN_URL}/attempts/1"],
     )
 
     assert selected.num_rows == 2
@@ -134,7 +135,7 @@ def test_averages_exclude_incomplete_and_missing_timings_per_metric() -> None:
     """Missing waits are not zero; failed jobs are not mixed with successes."""
     second = _completed("200")
     second.update(
-        job_started_at="2026-11-04T19:04:00Z", job_completed_at="2026-11-04T19:24:00Z"
+        job_started_at="2026-11-04T19:04:00Z", job_completed_at="2026-11-04T19:24:00Z",
     )
     unknown_wait = _completed("300")
     unknown_wait["job_created_at"] = None
@@ -146,7 +147,7 @@ def test_averages_exclude_incomplete_and_missing_timings_per_metric() -> None:
     skipped["job_conclusion"] = "skipped"
     invalid = _completed("700")
     invalid.update(
-        job_started_at="2026-11-04T18:00:00Z", job_completed_at="2026-11-04T17:00:00Z"
+        job_started_at="2026-11-04T18:00:00Z", job_completed_at="2026-11-04T17:00:00Z",
     )
     summary = job_averages(
         pa.Table.from_pylist(
@@ -158,7 +159,7 @@ def test_averages_exclude_incomplete_and_missing_timings_per_metric() -> None:
                 running,
                 skipped,
                 invalid,
-            ]
+            ],
         ),
     ).droplevel(["host", "owner", "repo", "workflow_file"])
     success = summary.loc[("Build / compile", "success")]
@@ -230,7 +231,7 @@ def test_workflow_directories_group_averages_with_their_own_runs(
 
 @pytest.mark.parametrize("urls", [[], [None], [""], ["https://example.com/pull/1"]])
 def test_batch_rejects_invalid_selection(
-    tmp_path: Path, urls: list[str | None]
+    tmp_path: Path, urls: list[str | None],
 ) -> None:
     _write_cache(tmp_path / "cache")
     result = _visualize(tmp_path, "-p", _selection(tmp_path, urls))
@@ -250,7 +251,7 @@ def test_batch_rejects_missing_column(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("extra", ["individual-html=maybe", f"run-url={RUN_URL}"])
 def test_batch_rejects_conflicting_or_invalid_options(
-    tmp_path: Path, extra: str
+    tmp_path: Path, extra: str,
 ) -> None:
     _write_cache(tmp_path / "cache")
     result = _visualize(tmp_path, "-p", _selection(tmp_path, [RUN_URL]), "-p", extra)
@@ -335,7 +336,7 @@ def test_selection_missing_file_is_reported(tmp_path: Path) -> None:
 def test_zero_duration_is_a_valid_sample() -> None:
     row = _completed("100")
     row.update(
-        job_started_at=row["job_created_at"], job_completed_at=row["job_created_at"]
+        job_started_at=row["job_created_at"], job_completed_at=row["job_created_at"],
     )
     summary = job_averages(pa.Table.from_pylist([row]))
 
@@ -345,7 +346,7 @@ def test_zero_duration_is_a_valid_sample() -> None:
 
 
 def test_batch_uses_supplied_job_data_without_any_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A standalone Parquet file is sufficient and its durations are the source of truth."""
     path = tmp_path / "jobs.parquet"

@@ -81,7 +81,7 @@ def _download_log(job_url: str, logs_dir: Path, progress: str) -> Path | None:
 
 
 def _delete_non_matching_logs(
-    log_paths: dict[int, Path], matched_indices: list[int]
+    log_paths: dict[int, Path], matched_indices: list[int],
 ) -> None:
     """Delete every downloaded log in `log_paths` whose index isn't in `matched_indices`.
 

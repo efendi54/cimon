@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 """Select cached run attempts and plot average job waiting and execution times."""
 
 from __future__ import annotations

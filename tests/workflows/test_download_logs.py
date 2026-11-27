@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
 from cimon.workflows import build_metrics, download_logs
 
 if TYPE_CHECKING:
@@ -117,6 +118,7 @@ def test_run_accepts_single_job_url(
 def test_run_uses_host_netrc_for_gh_without_login(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, token_var: str,
 ) -> None:
+    """Download logs using the host-specific netrc credential."""
     netrc = tmp_path / ".netrc"
     netrc.write_text(f"machine {host} login user password netrc-secret\n")
     netrc.chmod(0o600)
@@ -125,11 +127,13 @@ def test_run_uses_host_netrc_for_gh_without_login(
     monkeypatch.delenv("GH_ENTERPRISE_TOKEN", raising=False)
     calls = []
 
-    def run_gh(args, **kwargs):
+    def run_gh(
+        args: list[str], *, env: dict[str, str], stdout: BinaryIO, **_kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
         calls.append(args)
-        assert kwargs["env"][token_var] == "netrc-secret"
-        assert kwargs["env"]["GH_HOST"] == host
-        kwargs["stdout"].write(b"log contents\n")
+        assert env[token_var] == "netrc-secret"
+        assert env["GH_HOST"] == host
+        stdout.write(b"log contents\n")
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(build_metrics.subprocess, "run", run_gh)
@@ -139,7 +143,7 @@ def test_run_uses_host_netrc_for_gh_without_login(
     assert len(calls) == 1
     assert calls[0][1] == "api"
     assert (tmp_path / "out" / "logs" / "100" / "1.log").read_text() == "log contents\n"
-    assert build_metrics.os.environ["GH_TOKEN"] == "other-token"
+    assert build_metrics.os.environ["GH_TOKEN"] == "other-token"  # noqa: S105
 
 
 def test_run_accepts_json_array_of_urls(

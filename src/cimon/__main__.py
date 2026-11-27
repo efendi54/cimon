@@ -140,10 +140,10 @@ def quota(token: str | None, host: str | None, *, as_json: bool) -> None:
 )
 @click.option("--org", help="Organization to list self-hosted runners for, e.g. CAS.")
 @click.option(
-    "--owner", help="Repository owner, used with --repo if --org is not given."
+    "--owner", help="Repository owner, used with --repo if --org is not given.",
 )
 @click.option(
-    "--repo", help="Repository name, used with --owner if --org is not given."
+    "--repo", help="Repository name, used with --owner if --org is not given.",
 )
 @click.option(
     "-o",
@@ -188,7 +188,7 @@ def runners(
     try:
         session = create_session(token)
         runner_list = list_runners(
-            session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo
+            session, f"https://{host}/api/v3", org=org, owner=owner, repo=repo,
         )
         print_runner_status(runner_list)
 
@@ -219,7 +219,7 @@ def metrics() -> None:
     metavar="[OUTPUT_DIR]",
     required=False,
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path("/tmp"),
+    default=Path("/tmp"),  # noqa: S108
 )
 def build_metrics(input_arg: str, output_dir: Path) -> None:
     """Extract bazel build cache-hit-rate/duration metrics from job log(s).
@@ -267,7 +267,7 @@ def build_metrics(input_arg: str, output_dir: Path) -> None:
     "not.",
 )
 def download_logs(
-    input_arg: str, pattern: str | None, output_dir: Path, *, clear_logs: bool
+    input_arg: str, pattern: str | None, output_dir: Path, *, clear_logs: bool,
 ) -> None:
     """Download each job's log from INPUT, optionally keeping only the ones matching PATTERN.
 
@@ -365,7 +365,7 @@ def _date_boundary_option(value: str) -> str:
     is_flag=True,
     help="Show how many rows would be removed without modifying the Parquet file.",
 )
-def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) -> None:
+def prune_runs(parquet_file: Path, from_date: str, to_date: str, dry_run: bool) -> None:  # noqa: FBT001
     """Remove every run created within [--from-date, --to-date] from a workflows Parquet cache, in place.
 
     PARQUET_FILE is the workflows Parquet cache to modify (e.g.
@@ -413,7 +413,8 @@ def _query_sql(sql_path: Path, input_path: Path) -> "Table":
             connection.register("source", ds.dataset(input_path, format="parquet"))
             return connection.execute(statements[0]).to_arrow_table()
     except (duckdb.Error, OSError, ValueError) as exc:
-        raise click.ClickException(f"SQL query failed: {exc}") from exc
+        msg = f"SQL query failed: {exc}"
+        raise click.ClickException(msg) from exc
 
 
 @main.command("query")

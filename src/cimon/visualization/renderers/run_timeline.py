@@ -94,12 +94,12 @@ def prepare_jobs(table: pa.Table, tz: str) -> tuple[pd.DataFrame, pd.Timestamp]:
         (frame["start"] - frame["eligible"]).dt.total_seconds() / 60
     ).clip(lower=0)
     frame["dur_min"] = ((frame["end"] - frame["start"]).dt.total_seconds() / 60).clip(
-        lower=0
+        lower=0,
     )
     jobs = frame[(frame["job_conclusion"] != "skipped") & frame["start"].notna()]
     if not has_created or frame["job_created_at"].isna().all():
         logger.warning(
-            "No job_created_at in the cache for this run - queue times are unknown (run `cimon sync`)."
+            "No job_created_at in the cache for this run - queue times are unknown (run `cimon sync`).",
         )
     return jobs.copy(), snapshot
 
@@ -161,7 +161,7 @@ def critical_path(jobs: pd.DataFrame, gap_seconds: int) -> pd.DataFrame:
 def _segments(jobs: pd.DataFrame) -> pd.DataFrame:
     """One row per waiting phase (created -> started) and per running phase (started -> completed) of each job."""
     waiting = jobs[jobs["queue_min"] > 0].assign(
-        seg_start=jobs["eligible"], seg_end=jobs["start"], seg=WAITING
+        seg_start=jobs["eligible"], seg_end=jobs["start"], seg=WAITING,
     )
     running = jobs[
         ~((jobs["job_status"] == "queued") | (jobs["start"] == jobs["end"]))
@@ -174,7 +174,7 @@ def _segments(jobs: pd.DataFrame) -> pd.DataFrame:
 
 
 def _timeline_figure(
-    jobs: pd.DataFrame, title: str, run_url: str | None, snapshot: pd.Timestamp, tz: str
+    jobs: pd.DataFrame, title: str, run_url: str | None, snapshot: pd.Timestamp, tz: str,
 ) -> go.Figure:
     order = (
         jobs.groupby("stage")["eligible"]
@@ -219,7 +219,7 @@ def _timeline_figure(
     )
     figure.update_traces(opacity=0.75)
     figure.update_layout(
-        barmode="overlay", height=max(450, 24 * len(order) + 150), legend_title="Status"
+        barmode="overlay", height=max(450, 24 * len(order) + 150), legend_title="Status",
     )
     if (jobs["job_completed_at"].isna()).any():
         figure.add_shape(
@@ -284,7 +284,7 @@ def _critical_path_figure(path: pd.DataFrame, wall_minutes: float) -> go.Figure:
     path_h = (path["queue_min"] + path["dur_min"]).sum() / 60
     figure = px.bar(
         _segments(path).assign(
-            seg_min=lambda d: (d["seg_end"] - d["seg_start"]).dt.total_seconds() / 60
+            seg_min=lambda d: (d["seg_end"] - d["seg_start"]).dt.total_seconds() / 60,
         ),
         x="seg_min",
         y="job_name",
@@ -299,7 +299,7 @@ def _critical_path_figure(path: pd.DataFrame, wall_minutes: float) -> go.Figure:
         category_orders={"job_name": path["job_name"].tolist()},
     )
     figure.update_layout(
-        height=max(300, 40 * len(path) + 150), yaxis_autorange="reversed"
+        height=max(300, 40 * len(path) + 150), yaxis_autorange="reversed",
     )
     return figure
 
@@ -322,7 +322,7 @@ def render(
     run_id, attempt = first["run_id"], first["run_attempt"]
     if jobs.empty:
         logger.warning(
-            f"Run {run_id} has no started, non-skipped jobs - nothing to plot."
+            f"Run {run_id} has no started, non-skipped jobs - nothing to plot.",
         )
         return None
 
@@ -358,7 +358,7 @@ def render(
 
     logger.info(f"{title}")
     logger.info(
-        f"Contribution per stage:\n{stages.sort_values('span_h', ascending=False).round(2).to_string()}"
+        f"Contribution per stage:\n{stages.sort_values('span_h', ascending=False).round(2).to_string()}",
     )
     logger.info(
         "Critical path (heuristic, %.1f h, thereof %.1f h waiting for a runner):\n%s",
@@ -375,15 +375,15 @@ def render(
 def spec_for_run(params: Mapping[str, str]) -> dict[str, Any]:
     """Select a run URL or the run references from a Parquet selection."""
     if params.get("run-urls-file"):
-        from cimon.visualization.renderers.run_averages import (
-            selection_urls,  # noqa: PLC0415
+        from cimon.visualization.renderers.run_averages import (  # noqa: PLC0415
+            selection_urls,
         )
 
         if params.get("run-url"):
             msg = "Use either 'run-url' or 'run-urls-file', not both."
             raise ValueError(msg)
         return {
-            "any": [spec_for_run({"run-url": url}) for url in selection_urls(params)]
+            "any": [spec_for_run({"run-url": url}) for url in selection_urls(params)],
         }
     if "individual-html" in params:
         msg = "Parameter 'individual-html' requires 'run-urls-file'."
@@ -413,8 +413,8 @@ def render_run(table: pa.Table, output_dir: Path, params: Mapping[str, str]) -> 
         raise ValueError(msg) from None
 
     if params.get("run-urls-file"):
-        from cimon.visualization.renderers.run_averages import (
-            render_selection,  # noqa: PLC0415
+        from cimon.visualization.renderers.run_averages import (  # noqa: PLC0415
+            render_selection,
         )
 
         render_selection(table, output_dir, params, gap_seconds)

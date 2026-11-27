@@ -1,0 +1,1 @@
+# ruff: noqa: CPY001

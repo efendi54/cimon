@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001, T201
 """Script for retrieving and processing build metrics towards github workflow jobs that initiated bazel builds.
 
 - Dependency: gh (GitHub CLI) must be installed and authenticated for the repository's host.
@@ -36,11 +37,12 @@ from cimon.github_api import resolve_token
 
 logger = logging.getLogger(__name__)
 
+# GitHub CLI calls use PATH and pass arguments directly rather than through a shell.
 WORKFLOW_URL_RE = re.compile(
     r"^https://(?P<host>[^/]+)/"
     r"(?P<owner>[^/]+)/"
     r"(?P<repo>[^/]+)/"
-    r"actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)/?$"
+    r"actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)/?$",
 )
 
 
@@ -48,7 +50,7 @@ BUILD_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\s*"
     r"(?:##\[group\]\s*)?"
     r"(?:\x1B\[[0-?]*[ -/]*[@-~])*"
-    r"bazel build\b.*//[^ ]+.*$"
+    r"bazel build\b.*//[^ ]+.*$",
 )
 
 
@@ -56,7 +58,7 @@ INFO_RE = re.compile(r"^(?P<ts>.*) INFO: (?P<body>\d+ process(?:es)?: .*cache hi
 
 
 BUILDBUDDY_RE = re.compile(
-    r"Streaming build results to:\s*(?P<url>https://\S+/invocation/\S+)"
+    r"Streaming build results to:\s*(?P<url>https://\S+/invocation/\S+)",
 )
 
 
@@ -70,6 +72,7 @@ CACHE_RE = {
 
 
 def parse_ts(ts: str) -> datetime:
+    """Parse a GitHub timestamp, truncating fractional seconds to microseconds."""
     ts = ts.replace("Z", "+00:00")
 
     if "." in ts:
@@ -82,6 +85,7 @@ def parse_ts(ts: str) -> datetime:
 
 
 def fmt(sec: float) -> str:
+    """Format a duration in seconds for a report."""
     sec = round(sec)
     m, s = divmod(sec, 60)
     h, m = divmod(m, 60)
@@ -89,6 +93,7 @@ def fmt(sec: float) -> str:
 
 
 def extract(body: str, key: str) -> int:
+    """Extract the requested cache counter from a Bazel summary."""
     m = CACHE_RE[key].search(body)
     return int(m.group(1)) if m else 0
 
@@ -102,7 +107,7 @@ def github_cli_environment(host: str) -> dict[str, str]:
     )
     env_token = (
         env.get(token_var)
-        or (env.get("GITHUB_ENTERPRISE_TOKEN") if token_var == "GH_ENTERPRISE_TOKEN" else None)
+        or (env.get("GITHUB_ENTERPRISE_TOKEN") if token_var == "GH_ENTERPRISE_TOKEN" else None)  # noqa: S105
         or env.get("GH_TOKEN")
         or env.get("GITHUB_TOKEN")
     )
@@ -113,6 +118,7 @@ def github_cli_environment(host: str) -> dict[str, str]:
 
 
 def ensure_github_auth(host: str) -> None:
+    """Check that the GitHub CLI can authenticate for the host."""
     env = github_cli_environment(host)
     token_var = (
         "GH_TOKEN" if host == "github.com" or host.endswith(".ghe.com")
@@ -121,8 +127,8 @@ def ensure_github_auth(host: str) -> None:
     if env.get(token_var):
         return
 
-    result = subprocess.run(
-        ["gh", "auth", "status", "--hostname", host],
+    result = subprocess.run(  # noqa: S603
+        ["gh", "auth", "status", "--hostname", host],  # noqa: S607
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -132,9 +138,12 @@ def ensure_github_auth(host: str) -> None:
     if result.returncode == 0:
         return
 
-    raise RuntimeError(
+    msg = (
         f"No credentials for {host}: add a matching .netrc entry, set a GitHub token, "
-        "or authenticate with gh.",
+        "or authenticate with gh."
+    )
+    raise RuntimeError(
+        msg,
     )
 
 
@@ -144,8 +153,9 @@ def get_job_info(
     repo: str,
     job_id: str,
 ) -> dict[str, Any]:
-    result = subprocess.run(
-        [
+    """Fetch a job's name and active duration from GitHub."""
+    result = subprocess.run(  # noqa: S603
+        [  # noqa: S607
             "gh",
             "api",
             "--hostname",
@@ -183,7 +193,7 @@ def load_cached_job_info(json_file: Path) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(json_file, encoding="utf-8") as f:
+        with json_file.open(encoding="utf-8") as f:
             cached = json.load(f)
         return {
             "job_name": cached["job_name"],
@@ -213,7 +223,8 @@ def download_job_log_for_url(
     match = WORKFLOW_URL_RE.match(workflow_url)
 
     if not match:
-        raise ValueError("Invalid workflow URL")
+        msg = "Invalid workflow URL"
+        raise ValueError(msg)
 
     info = match.groupdict()
     output_dir = output_root / info["run_id"]
@@ -244,6 +255,7 @@ def download_job_log(
     job_id: str,
     output_dir: Path,
 ) -> Path:
+    """Download a job log atomically, reusing an existing non-empty log."""
     logfile = output_dir / f"{job_id}.log"
     partial_logfile = logfile.with_suffix(".log.part")
 
@@ -255,9 +267,9 @@ def download_job_log(
     partial_logfile.unlink(missing_ok=True)
 
     try:
-        with open(partial_logfile, "wb") as f:
-            subprocess.run(
-                [
+        with partial_logfile.open("wb") as f:
+            subprocess.run(  # noqa: S603
+                [  # noqa: S607
                     "gh",
                     "api",
                     "--hostname",
@@ -276,16 +288,17 @@ def download_job_log(
 
 
 def download_build_profiles_if_exists(
-    host,
-    owner,
-    repo,
-    run_id,
+    host: str,
+    owner: str,
+    repo: str,
+    run_id: str,
     output_dir: Path,
 ) -> None:
+    """Download the build-profiles artifact if the workflow run has one."""
     print("Checking artifact 'build-profiles'...")
 
-    result = subprocess.run(
-        [
+    result = subprocess.run(  # noqa: S603
+        [  # noqa: S607
             "gh",
             "api",
             "--hostname",
@@ -311,8 +324,8 @@ def download_build_profiles_if_exists(
     target = output_dir / "build-profiles"
     target.mkdir(parents=True, exist_ok=True)
 
-    subprocess.run(
-        [
+    subprocess.run(  # noqa: S603
+        [  # noqa: S607
             "gh",
             "run",
             "download",
@@ -335,8 +348,9 @@ def parse_bazel_build_args(command_line: str) -> tuple[list[str], list[str]]:
 
     try:
         build_index = args.index("build")
-    except ValueError:
-        raise ValueError("No 'bazel build' command found.")
+    except ValueError as exc:
+        msg = "No 'bazel build' command found."
+        raise ValueError(msg) from exc
 
     args = args[build_index + 1 :]
 
@@ -354,7 +368,8 @@ def parse_bazel_build_args(command_line: str) -> tuple[list[str], list[str]]:
         # --target_pattern_file <file>
         if arg == "--target_pattern_file":
             if i + 1 >= len(args):
-                raise ValueError("--target_pattern_file specified without filename.")
+                msg = "--target_pattern_file specified without filename."
+                raise ValueError(msg)
             return [args[i + 1]], configs
 
         # --config=<name>
@@ -364,12 +379,13 @@ def parse_bazel_build_args(command_line: str) -> tuple[list[str], list[str]]:
         # --config <name>
         elif arg == "--config":
             if i + 1 >= len(args):
-                raise ValueError("--config specified without a value.")
+                msg = "--config specified without a value."
+                raise ValueError(msg)
             configs.append(args[i + 1])
             i += 1
 
         # Bazel target
-        elif arg.startswith("//") or arg.startswith("@"):
+        elif arg.startswith(("//", "@")):
             targets.append(arg)
 
         i += 1
@@ -400,7 +416,7 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
             entry["info_missing"] = True
         builds.append(entry)
 
-    with open(logfile, encoding="utf-8", errors="replace") as f:
+    with logfile.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             bm = BUILD_RE.search(line)
 
@@ -446,7 +462,7 @@ def parse_log(logfile: Path) -> list[dict[str, Any]]:
                             "sandbox": extract(body, "sandbox"),
                             "local": extract(body, "local"),
                         },
-                    }
+                    },
                 )
 
     if current is not None:
@@ -507,6 +523,7 @@ def generate_md_table_entries(
     builds: list[dict[str, Any]],
     job_info: dict[str, Any],
 ) -> str:
+    """Render the parsed builds as a Markdown report."""
     md = [
         f"# {job_info['job_name']}\n",
         f"**URL:** <{job_info['job_url']}>\n",
@@ -522,9 +539,12 @@ def generate_md_table_entries(
 
     md.extend(
         [
-            "Target | Config | Duration | Cache Hit Rate | Local Cache Eff. | Executed | Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |",
+            (
+                "Target | Config | Duration | Cache Hit Rate | Local Cache Eff. | Executed | "
+                "Action | Remote | Internal | Local | Sandbox | Hits | Total | Build-Logs |"
+            ),
             "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-        ]
+        ],
     )
 
     for b in builds:
@@ -569,8 +589,8 @@ def generate_md_table_entries(
 
         # Bazel reports cache stats per invocation, not per target, so every
         # target of a multi-target build shares the same duration/rate/cache.
-        for target in b["targets"]:
-            md.append(
+        md.extend(
+            (
                 f"| {target} "
                 f"| {config} "
                 f"| {duration_cell} "
@@ -586,6 +606,8 @@ def generate_md_table_entries(
                 f"| {total_cell} "
                 f"| {cell} |"
             )
+            for target in b["targets"]
+        )
 
     return "\n".join(md)
 
@@ -615,23 +637,23 @@ def flatten_metric_rows(
             duration_sec = b["duration_sec"]
             rates = compute_cache_rates(b["cache"])
 
-        for target in b["targets"]:
-            rows.append(
-                {
-                    "job_run_url": workflow_url,
-                    "job_name": job_info["job_name"],
-                    "runner_name": runner_name,
-                    "start_ts": b["start_ts"],
-                    "target": target,
-                    "config": config,
-                    "duration_sec": duration_sec,
-                    "hit_rate": rates["hit_rate"],
-                    "local_cache_effectiveness": rates["local_cache_effectiveness"],
-                    "executed_share": rates["executed_share"],
-                    "hits": rates["hits"],
-                    "total": rates["total"],
-                },
-            )
+        rows.extend(
+            {
+                "job_run_url": workflow_url,
+                "job_name": job_info["job_name"],
+                "runner_name": runner_name,
+                "start_ts": b["start_ts"],
+                "target": target,
+                "config": config,
+                "duration_sec": duration_sec,
+                "hit_rate": rates["hit_rate"],
+                "local_cache_effectiveness": rates["local_cache_effectiveness"],
+                "executed_share": rates["executed_share"],
+                "hits": rates["hits"],
+                "total": rates["total"],
+            }
+            for target in b["targets"]
+        )
 
     return rows
 
@@ -677,7 +699,7 @@ def render_hit_rate_trend(rows: list[dict[str, Any]], output_path: Path) -> None
     )
 
     colors = dict(
-        zip(sorted(frame["config"].unique()), cycle(px.colors.qualitative.Dark24))
+        zip(sorted(frame["config"].unique()), cycle(px.colors.qualitative.Dark24)),
     )
 
     for config, group in frame.groupby("config"):
@@ -695,7 +717,10 @@ def render_hit_rate_trend(rows: list[dict[str, Any]], output_path: Path) -> None
                 legendgroup=config,
                 marker={"color": colors[config]},
                 customdata=customdata,
-                hovertemplate="%{y:.1f}%<br>runner: %{customdata[1]}<br>targets: %{customdata[2]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>",
+                hovertemplate=(
+                    "%{y:.1f}%<br>runner: %{customdata[1]}<br>targets: "
+                    "%{customdata[2]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>"
+                ),
             ),
             row=1,
             col=1,
@@ -710,7 +735,10 @@ def render_hit_rate_trend(rows: list[dict[str, Any]], output_path: Path) -> None
                 showlegend=False,
                 marker={"color": colors[config]},
                 customdata=customdata,
-                hovertemplate="%{y:.1f} min<br>runner: %{customdata[1]}<br>targets: %{customdata[2]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>",
+                hovertemplate=(
+                    "%{y:.1f} min<br>runner: %{customdata[1]}<br>targets: "
+                    "%{customdata[2]}<br>%{customdata[0]}<extra>%{fullData.name}</extra>"
+                ),
             ),
             row=2,
             col=1,
@@ -984,7 +1012,7 @@ def process_job_run(
         "build_info": builds,
     }
 
-    with open(json_file, "w", encoding="utf-8") as f:
+    with json_file.open("w", encoding="utf-8") as f:
         json.dump(
             build_metrics,
             f,
@@ -993,16 +1021,8 @@ def process_job_run(
 
     md_file = output_dir / f"{info['job_id']}.md"
 
-    with open(md_file, "w", encoding="utf-8") as f:
+    with md_file.open("w", encoding="utf-8") as f:
         f.write(generate_md_table_entries(builds, job_info))
-
-    # download_build_profiles_if_exists(
-    #     info["host"],
-    #     info["owner"],
-    #     info["repo"],
-    #     info["run_id"],
-    #     output_dir,
-    # )
 
     print("\n====================")
     print("OUTPUT")
@@ -1017,19 +1037,21 @@ def process_job_run(
 
 def main(
     workflow_url: str,
-    output_root: Path = Path("/tmp"),
+    output_root: Path = Path("/tmp"),  # noqa: S108
 ) -> int:
+    """Process one workflow job and write its metrics."""
     process_job_run(workflow_url, output_root)
     return 0
 
 
 def _job_entries_from_json(input_path: Path) -> list[dict[str, Any]]:
     """Read job run URLs (and runner_name, if present) from a JSON array of `{"job": {...}}` entries."""
-    with open(input_path, encoding="utf-8") as f:
+    with input_path.open(encoding="utf-8") as f:
         entries = json.load(f)
 
     if not isinstance(entries, list):
-        raise ValueError("JSON must contain an array.")
+        msg = "JSON must contain an array."
+        raise ValueError(msg)  # noqa: TRY004
 
     jobs: list[dict[str, Any]] = []
 
@@ -1044,7 +1066,8 @@ def _job_entries_from_json(input_path: Path) -> list[dict[str, Any]]:
         job = info["job"]
         url = job["job_url"]
         if not isinstance(url, str):
-            raise ValueError(f"Job run URL {url!r} is not a string.")
+            msg = f"Job run URL {url!r} is not a string."
+            raise ValueError(msg)  # noqa: TRY004
 
         jobs.append({"job_url": url, "runner_name": job.get("runner_name")})
 
@@ -1072,7 +1095,7 @@ def _job_entries_from_parquet(
 
     return [
         {"job_url": url, "runner_name": runner_name}
-        for url, runner_name in zip(urls, runner_names)
+        for url, runner_name in zip(urls, runner_names, strict=False)
         if url
     ]
 
@@ -1092,8 +1115,9 @@ def resolve_job_entries(input_arg: str) -> list[dict[str, Any]]:
     input_path = Path(input_arg)
 
     if not input_path.is_file():
+        msg = f"'{input_arg}' is neither a workflow URL, a JSON file, nor a Parquet file."
         raise ValueError(
-            f"'{input_arg}' is neither a workflow URL, a JSON file, nor a Parquet file."
+            msg,
         )
 
     return (
@@ -1105,17 +1129,19 @@ def resolve_job_entries(input_arg: str) -> list[dict[str, Any]]:
 
 def _job_urls_from_json(input_path: Path) -> list[str]:
     """Read job run URLs from a top-level JSON array of URL strings."""
-    with open(input_path, encoding="utf-8") as f:
+    with input_path.open(encoding="utf-8") as f:
         entries = json.load(f)
 
     if not isinstance(entries, list):
-        raise ValueError("JSON must contain an array.")
+        msg = "JSON must contain an array."
+        raise ValueError(msg)  # noqa: TRY004
 
     urls: list[str] = []
 
     for url in entries:
         if not isinstance(url, str):
-            raise ValueError(f"Job run URL {url!r} is not a string.")
+            msg = f"Job run URL {url!r} is not a string."
+            raise ValueError(msg)  # noqa: TRY004
         urls.append(url)
 
     return urls
@@ -1142,8 +1168,9 @@ def resolve_job_urls(input_arg: str) -> list[str]:
     input_path = Path(input_arg)
 
     if not input_path.is_file():
+        msg = f"'{input_arg}' is neither a workflow URL, a JSON file, nor a Parquet file."
         raise ValueError(
-            f"'{input_arg}' is neither a workflow URL, a JSON file, nor a Parquet file."
+            msg,
         )
 
     return (
@@ -1157,6 +1184,7 @@ def process_input(
     input_arg: str,
     output_root: Path,
 ) -> int:
+    """Process job input and generate per-job and aggregate reports."""
     if WORKFLOW_URL_RE.match(input_arg):
         return main(input_arg, output_root)
 
@@ -1200,12 +1228,12 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         print(
             f"Usage: {sys.argv[0]} "
-            "<job-run-url | json-file | parquet-file> [output-dir]"
+            "<job-run-url | json-file | parquet-file> [output-dir]",
         )
         sys.exit(1)
 
     input_arg = sys.argv[1]
 
-    out = Path(sys.argv[2]) if len(sys.argv) == 3 else Path("/tmp")
+    out = Path(sys.argv[2]) if len(sys.argv) == 3 else Path("/tmp")  # noqa: PLR2004, S108
 
     sys.exit(process_input(input_arg, out))

@@ -1,0 +1,21 @@
+name: 🚀 Feature request
+description: "Suggest a new GH Owners feature"
+type: Feature
+
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for your request.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        Please give as much detail as possible about the feature you would like to suggest. 🙏
+
+        You might like to add:
+        * Your use case(s) for the feature
+        * Why the feature should be added
+    validations:
+      required: true

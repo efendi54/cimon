@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""
-Erzeugt einen Markdown-Report über den Festplattenverbrauch von GitHub-Actions
-Runnern, basierend auf Job-Log-Dateien unter ~/tmp/logs/<run_id>/<job_id>.log.
+# ruff: noqa: CPY001
+"""Erzeugt einen Markdown-Report über den Festplattenverbrauch von GitHub-Actions Runnern.
+
+Die Daten basieren auf Job-Log-Dateien unter ~/tmp/logs/<run_id>/<job_id>.log.
 
 Jede Log-Datei enthält u.a.:
   - eine Zeile "Runner name: '<name>'"
@@ -21,13 +22,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)Z\s+(.*)$")
 RUNNER_NAME_RE = re.compile(r"Runner name:\s*'([^']+)'")
 JOB_NAME_RE = re.compile(r"Complete job name:\s*(.*?)\s*\(([^()]*)\)\s*$")
 DISK_LINE_RE = re.compile(
     r"^(?P<filesystem>\S+)\s+(?P<size>\S+)\s+(?P<used>\S+)\s+"
-    r"(?P<avail>\S+)\s+(?P<pct>\d+)%\s+(?P<mount>\S+)$"
+    r"(?P<avail>\S+)\s+(?P<pct>\d+)%\s+(?P<mount>\S+)$",
 )
 
 
@@ -37,15 +37,18 @@ SIZE_UNIT_FACTORS = {
     "G": 1.0,
     "T": 1024.0,
 }
+MIN_DISK_SAMPLES = 2
 
 
 def parse_size_to_gb(raw: str) -> float:
-    """Wandelt df-Größenangaben wie '235G', '512M' oder '1.2T' in GB (als
-    Gleitkommazahl) um, damit präzisere Deltas als über das gerundete
-    Prozent-Feld berechnet werden können."""
+    """Wandelt df-Größenangaben wie '235G', '512M' oder '1.2T' in GB um.
+
+    Die Gleitkommazahl erlaubt präzisere Deltas als das gerundete Prozent-Feld.
+    """
     match = re.match(r"^([\d.]+)([KMGT]?)$", raw.strip(), re.IGNORECASE)
     if not match:
-        raise ValueError(f"Unerwartetes Größenformat: {raw!r}")
+        msg = f"Unerwartetes Größenformat: {raw!r}"
+        raise ValueError(msg)
     value, unit = match.groups()
     factor = SIZE_UNIT_FACTORS.get(unit.upper(), 1.0)
     return float(value) * factor
@@ -53,6 +56,8 @@ def parse_size_to_gb(raw: str) -> float:
 
 @dataclass
 class DiskSample:
+    """Festplattenmessung aus einer Log-Zeile."""
+
     timestamp: datetime
     size: str
     used: str
@@ -62,6 +67,7 @@ class DiskSample:
 
     @property
     def used_gb(self) -> float:
+        """Gibt die belegte Größe in GB zurück."""
         return parse_size_to_gb(self.used)
 
 
@@ -72,6 +78,8 @@ GHE_RUN_URL_TEMPLATE = (
 
 @dataclass
 class JobEntry:
+    """Festplattenmessungen vor und nach einem Job."""
+
     run_id: str
     job_id: str
     runner_name: str
@@ -82,25 +90,31 @@ class JobEntry:
 
     @property
     def delta_percent(self) -> int:
+        """Gibt die Änderung der Belegung in Prozentpunkten zurück."""
         return self.after.percent - self.before.percent
 
     @property
     def delta_used_gb(self) -> float:
+        """Gibt die Änderung der Belegung in GB zurück."""
         return self.after.used_gb - self.before.used_gb
 
     @property
     def url(self) -> str:
+        """Gibt die GitHub-URL des Jobs zurück."""
         return GHE_RUN_URL_TEMPLATE.format(run_id=self.run_id, job_id=self.job_id)
 
 
 def parse_timestamp(base: str, frac: str) -> datetime:
-    """Baut aus Datum/Zeit-Basis und Nachkommastellen (ggf. >6 Stellen, da
-    die Logs teils Sub-Mikrosekunden-Präzision verwenden) ein datetime."""
+    """Baut aus Datum/Zeit-Basis und Nachkommastellen ein datetime.
+
+    Die Logs verwenden teils Sub-Mikrosekunden-Präzision.
+    """
     frac6 = (frac + "000000")[:6]
     return datetime.fromisoformat(f"{base}.{frac6}")
 
 
 def parse_log_file(path: Path) -> JobEntry | None:
+    """Liest Runner- und Festplattenmessungen aus einer Job-Log-Datei."""
     runner_name: str | None = None
     job_name: str | None = None
     disk_samples: list[DiskSample] = []
@@ -133,10 +147,10 @@ def parse_log_file(path: Path) -> JobEntry | None:
                     avail=disk_match.group("avail"),
                     percent=int(disk_match.group("pct")),
                     mount=disk_match.group("mount"),
-                )
+                ),
             )
 
-    if runner_name is None or len(disk_samples) < 2:
+    if runner_name is None or len(disk_samples) < MIN_DISK_SAMPLES:
         # Unvollständige/unerwartete Log-Datei überspringen.
         return None
 
@@ -153,6 +167,7 @@ def parse_log_file(path: Path) -> JobEntry | None:
 
 
 def collect_entries(logs_dir: Path) -> list[JobEntry]:
+    """Sammelt auswertbare Job-Logs aus dem Verzeichnis."""
     entries: list[JobEntry] = []
     for log_path in sorted(logs_dir.glob("**/*.log")):
         entry = parse_log_file(log_path)
@@ -162,10 +177,12 @@ def collect_entries(logs_dir: Path) -> list[JobEntry]:
 
 
 def format_dt(dt: datetime) -> str:
+    """Formatiert einen Zeitpunkt für den Report."""
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def format_delta(delta: int) -> str:
+    """Formatiert eine Prozentpunktdifferenz mit Vorzeichen."""
     if delta > 0:
         return f"+{delta}%"
     if delta < 0:
@@ -174,16 +191,19 @@ def format_delta(delta: int) -> str:
 
 
 def format_delta_gb(delta_gb: float) -> str:
+    """Formatiert eine Größenänderung mit Vorzeichen."""
     sign = "+" if delta_gb > 0 else ("" if delta_gb < 0 else "±")
     return f"{sign}{delta_gb:.1f} GB"
 
 
 def format_days(start: datetime, end: datetime) -> str:
+    """Formatiert eine Zeitspanne als Tage."""
     days = (end - start).total_seconds() / 86400
     return f"{days:.1f}"
 
 
 def format_timespan(start: datetime, end: datetime) -> str:
+    """Formatiert eine Zeitspanne als Tage, Stunden und Minuten."""
     total_seconds = int((end - start).total_seconds())
     days, remainder = divmod(total_seconds, 86400)
     hours, remainder = divmod(remainder, 3600)
@@ -199,6 +219,7 @@ def format_timespan(start: datetime, end: datetime) -> str:
 
 
 def build_markdown(entries: list[JobEntry]) -> str:
+    """Erstellt den Markdown-Report aus den ausgewerteten Jobs."""
     by_runner: dict[str, list[JobEntry]] = defaultdict(list)
     for entry in entries:
         by_runner[entry.runner_name].append(entry)
@@ -213,11 +234,11 @@ def build_markdown(entries: list[JobEntry]) -> str:
     lines.append("")
     lines.append(
         f"Ausgewertete Jobs: **{len(entries)}** "
-        f"über **{len(by_runner)}** Runner."
+        f"über **{len(by_runner)}** Runner.",
     )
     lines.append(
         f"Betrachteter Zeitraum: **{format_dt(oldest)}** bis **{format_dt(newest)}** "
-        f"(Dauer: {format_timespan(oldest, newest)})."
+        f"(Dauer: {format_timespan(oldest, newest)}).",
     )
     lines.append("")
 
@@ -226,7 +247,7 @@ def build_markdown(entries: list[JobEntry]) -> str:
     lines.append("")
     lines.append(
         "| Runner | Anzahl Jobs | Erster Job | Letzter Job | Zeitspanne (Tage) | "
-        "Max. Belegung | Max. Delta (%) | Max. Delta (GB) |"
+        "Max. Belegung | Max. Delta (%) | Max. Delta (GB) |",
     )
     lines.append("|---|---|---|---|---|---|---|---|")
     for runner_name in sorted(by_runner):
@@ -243,7 +264,7 @@ def build_markdown(entries: list[JobEntry]) -> str:
             f"| {format_days(first_ts, last_ts)} "
             f"| {max_pct}% "
             f"| {format_delta(max_delta_pct.delta_percent)} "
-            f"| {format_delta_gb(max_delta_gb.delta_used_gb)} |"
+            f"| {format_delta_gb(max_delta_gb.delta_used_gb)} |",
         )
     lines.append("")
 
@@ -258,21 +279,21 @@ def build_markdown(entries: list[JobEntry]) -> str:
         lines.append("")
         lines.append(
             "| # | Zeitpunkt (Start) | Job | Belegung vorher | Belegung nachher | "
-            "Delta (%) | Belegt vorher | Belegt nachher | Delta (GB) | Workflow-Run / Job |"
+            "Delta (%) | Belegt vorher | Belegt nachher | Delta (GB) | Workflow-Run / Job |",
         )
         lines.append("|---|---|---|---|---|---|---|---|---|---|")
         for idx, entry in enumerate(runner_entries, start=1):
             lines.append(
                 f"| {idx} "
                 f"| {format_dt(entry.before.timestamp)} "
-                f"| {entry.job_name or '–'} "
+                f"| {entry.job_name or '–'} "  # noqa: RUF001
                 f"| {entry.before.percent}% "
                 f"| {entry.after.percent}% "
                 f"| {format_delta(entry.delta_percent)} "
                 f"| {entry.before.used} / {entry.before.size} "
                 f"| {entry.after.used} / {entry.after.size} "
                 f"| {format_delta_gb(entry.delta_used_gb)} "
-                f"| [{entry.run_id}/{entry.job_id}]({entry.url}) |"
+                f"| [{entry.run_id}/{entry.job_id}]({entry.url}) |",
             )
         lines.append("")
 
@@ -280,6 +301,7 @@ def build_markdown(entries: list[JobEntry]) -> str:
 
 
 def main() -> None:
+    """Liest Job-Logs und schreibt den angeforderten Report."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--logs-dir",
@@ -296,16 +318,20 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.logs_dir.is_dir():
-        raise SystemExit(f"Logs-Verzeichnis nicht gefunden: {args.logs_dir}")
+        msg = f"Logs-Verzeichnis nicht gefunden: {args.logs_dir}"
+        raise SystemExit(msg)
 
     entries = collect_entries(args.logs_dir)
     if not entries:
-        raise SystemExit(f"Keine auswertbaren Log-Dateien in {args.logs_dir} gefunden.")
+        msg = f"Keine auswertbaren Log-Dateien in {args.logs_dir} gefunden."
+        raise SystemExit(msg)
 
     markdown = build_markdown(entries)
     args.output.write_text(markdown, encoding="utf-8")
-    print(f"Report geschrieben: {args.output} ({len(entries)} Jobs, "
-          f"{len({e.runner_name for e in entries})} Runner)")
+    print(  # noqa: T201
+        f"Report geschrieben: {args.output} ({len(entries)} Jobs, "
+        f"{len({e.runner_name for e in entries})} Runner)",
+    )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from click.testing import CliRunner
+
 from cimon.__main__ import main
 from cimon.visualization.renderers.run_timeline import (
     critical_path,
@@ -15,7 +17,6 @@ from cimon.visualization.renderers.run_timeline import (
     stage_contribution,
     union_minutes,
 )
-from click.testing import CliRunner
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,7 +74,7 @@ def _rows() -> list[dict[str, object]]:
             created="2026-11-04T20:00:00Z",
         ),
         _job(
-            "Test B / run", "2026-11-04T20:00:40Z", None, created="2026-11-04T20:00:00Z"
+            "Test B / run", "2026-11-04T20:00:40Z", None, created="2026-11-04T20:00:00Z",
         ),
         _job(
             "Test C / run",
@@ -103,7 +104,7 @@ def _rows() -> list[dict[str, object]]:
 def _write_cache(cache_dir: Path, rows: list[dict[str, object]] | None = None) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     pq.write_table(
-        pa.Table.from_pylist(rows or _rows()), cache_dir / "workflows.parquet"
+        pa.Table.from_pylist(rows or _rows()), cache_dir / "workflows.parquet",
     )
 
 
@@ -153,7 +154,7 @@ def test_visualize_with_attempt_in_url_plots_running_and_skips_skipped(
     assert "Release" not in html
     # Plotly serializes "/" as \\u002f inside the embedded figure JSON.
     run_url = "https://example.com/acme/app/actions/runs/100/attempts/1".replace(
-        "/", "\\u002f"
+        "/", "\\u002f",
     )
     assert f'href=\\"{run_url}\\"' in html
 
@@ -191,7 +192,7 @@ def test_visualize_unknown_run_fails(tmp_path: Path) -> None:
     _write_cache(tmp_path / "cache")
 
     result = _visualize(
-        tmp_path, "-p", "run-url=https://example.com/acme/app/actions/runs/999"
+        tmp_path, "-p", "run-url=https://example.com/acme/app/actions/runs/999",
     )
 
     assert result.exit_code != 0
@@ -258,10 +259,10 @@ def test_visualize_rejects_unknown_parameter_and_malformed_option(
 def test_union_minutes_counts_overlaps_once() -> None:
     """Overlapping intervals only count once towards the wall-clock time."""
     starts = pd.Series(
-        pd.to_datetime(["2026-01-01 10:00", "2026-01-01 10:30", "2026-01-01 12:00"])
+        pd.to_datetime(["2026-01-01 10:00", "2026-01-01 10:30", "2026-01-01 12:00"]),
     )
     ends = pd.Series(
-        pd.to_datetime(["2026-01-01 11:00", "2026-01-01 11:30", "2026-01-01 12:30"])
+        pd.to_datetime(["2026-01-01 11:00", "2026-01-01 11:30", "2026-01-01 12:30"]),
     )
 
     assert union_minutes(starts, ends) == 90 + 30

@@ -84,7 +84,7 @@ def _workflow_job_durations_spec(params: Mapping[str, str]) -> Mapping[str, Any]
 
 
 def _render_workflow_job_durations(
-    table: pa.Table, output_dir: Path, params: Mapping[str, str]
+    table: pa.Table, output_dir: Path, params: Mapping[str, str],
 ) -> None:
     from cimon.visualization.renderers.run_timeline import render_run  # noqa: PLC0415
 

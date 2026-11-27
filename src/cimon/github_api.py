@@ -88,7 +88,7 @@ def _log_credential_source(host: str, *, from_netrc: bool, has_env_token: bool) 
         logger.info(f"Credentials for {host}: from .netrc{overrides}")
     elif has_env_token:
         logger.info(
-            f"Credentials for {host}: from environment token (no matching .netrc entry)"
+            f"Credentials for {host}: from environment token (no matching .netrc entry)",
         )
 
 
@@ -96,7 +96,7 @@ def resolve_token(host: str, env_token: str | None) -> str | None:
     """Return the `.netrc` password for `host` if present, else `env_token`; logs which one."""
     token = netrc_token(host)
     _log_credential_source(
-        host, from_netrc=token is not None, has_env_token=bool(env_token)
+        host, from_netrc=token is not None, has_env_token=bool(env_token),
     )
     return token or env_token
 
@@ -162,7 +162,7 @@ def api_get(
             logger.warning("API quota low: %s", remaining)
 
         if remaining and quota_limit is not None and int(remaining) <= quota_limit:
-            session._quota_exceeded = True
+            session._quota_exceeded = True  # noqa: SLF001
             msg = f"GitHub API quota limit reached: {remaining} remaining <= configured limit {quota_limit}"
             raise QuotaLimitReachedError(msg)
 
@@ -185,7 +185,7 @@ def api_get(
 
             retry_after = response.headers.get("Retry-After")
             delay = min(
-                int(retry_after) if retry_after else 2**attempt, MAX_RETRY_DELAY_SECONDS
+                int(retry_after) if retry_after else 2**attempt, MAX_RETRY_DELAY_SECONDS,
             )
             logger.warning("Retry %s in %ss", response.status_code, delay)
             time.sleep(delay)
@@ -351,7 +351,7 @@ def save_runner_snapshot(runners: list[dict[str, Any]], snapshots_dir: Path) -> 
 
 
 def append_runner_snapshot(
-    runners: list[dict[str, Any]], cache_path: Path, snapshots_dir: Path
+    runners: list[dict[str, Any]], cache_path: Path, snapshots_dir: Path,
 ) -> Path:
     """Persist a runner-status poll as JSON, then fold that same JSON into the Parquet cache.
 
@@ -381,7 +381,7 @@ def append_runner_snapshot(
 
     if cache_path.exists():
         new_rows = pa.concat_tables(
-            [pq.read_table(cache_path), new_rows], promote_options="default"
+            [pq.read_table(cache_path), new_rows], promote_options="default",
         )
 
     write_table_atomic(new_rows, cache_path)
@@ -397,7 +397,7 @@ def _runner_state(runner: Mapping[str, Any]) -> str:
 
 
 def render_runner_status_chart(
-    runners: list[dict[str, Any]], output_path: Path
+    runners: list[dict[str, Any]], output_path: Path,
 ) -> None:
     """Plot a treemap of runner labels -> runner names, colored by current status.
 

@@ -6,8 +6,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pyarrow.parquet as pq
-from cimon.__main__ import main
 from click.testing import CliRunner
+
+from cimon.__main__ import main
 
 from tests.workflows.test_query import _write_sample
 

@@ -1,4 +1,4 @@
-# ruff: noqa: ANN001, D100, D103, PLR2004
+# ruff: noqa: ANN001, CPY001, D100, D103, PLR2004
 
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ def test_sync_propagates_other_stale_run_errors(tmp_path, sync_api, mocker, stat
     args = sync_args(tmp_path, ["cas_nightly_and_release.yml"])
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 0, (result.output, result.exception)
-    sync_api["fetch"].side_effect = lambda *args, **kwargs: iter([])
+    sync_api["fetch"].side_effect = lambda *_args, **_kwargs: iter([])
     response = requests.Response() if status is not None else None
     if response is not None:
         response.status_code = status

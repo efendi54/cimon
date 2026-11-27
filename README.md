@@ -33,6 +33,14 @@ changes: this can also upgrade dependencies. The changed lockfile applies to
 everyone using the repository; JFrog must be configured and reachable where
 it is used.
 
+### Pull request tests
+
+The [PR workflow](.github/workflows/pr.yml) runs the full test suite when a
+pull request is opened, reopened, or updated with commits. It tests GitHub's
+PR merge commit with Python 3.12, including the `viz` extra. To require the
+tests before merging, configure `cimon full test suite` as a required status
+check in the repository's ruleset or branch protection rules.
+
 ### Automatic version bumps
 
 The [version-bump workflow](.github/workflows/version-bump.yml) runs after a
@@ -47,6 +55,24 @@ The workflow requires Actions to have `contents: write` permission and
 permission to push to `main` and create tags. A competing push can cause its
 atomic push to fail; a later workflow run processes the updated `main`.
 It does not create a GitHub Release.
+
+### Creating a pull request
+
+Install the GitHub CLI and authenticate with `gh auth login`. From a cimon Git
+checkout, commit your changes on a feature branch, then run:
+
+```bash
+gh pr create --template pull_request_template.md
+```
+
+The [PR template](.github/pull_request_template.md) must be present on the
+repository's default branch. `gh` uses the current branch and guides you
+through creating the pull request, offering to push the branch if needed.
+Fill in the summary, changes, and validation commands and results.
+
+For squash merges, use a Conventional Commit PR title such as
+`feat: add metrics export` so the resulting commit can trigger the automatic
+version bump when appropriate.
 
 ## Purpose
 

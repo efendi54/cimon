@@ -13,6 +13,12 @@ Small CLI tool for tracking github action workflow runs related data.
   `uv run --extra viz cimon query ...`. The Plotly visualizations themselves
   use standard dependencies.
 
+For development, [Commitizen](https://commitizen-tools.github.io/commitizen/)
+and [pre-commit](https://pre-commit.com/) are included in the uv `dev` group.
+[actionlint](https://github.com/rhysd/actionlint) is an optional, separately
+installed tool for checking GitHub Actions workflows locally; it is not a
+Python dependency.
+
 The [DuckDB Sidekick](https://marketplace.visualstudio.com/items?itemName=PrasertKana.duckdb-sidekick&utm_source=chatgpt.com)
 VS Code extension is optional and useful for inspecting Parquet files.
 
@@ -40,6 +46,8 @@ pull request is opened, reopened, or updated with commits. It tests GitHub's
 PR merge commit with Python 3.12, including the `viz` extra. To require the
 tests before merging, configure `cimon full test suite` as a required status
 check in the repository's ruleset or branch protection rules.
+The `cimon workflow lint` check runs actionlint on all workflow files and can
+also be configured as a required status check.
 
 ### Commit convention
 
@@ -55,15 +63,59 @@ breaking change since the current version tag. Other types such as `docs` or
 `refactor` alone do not trigger it. For squash merges, ensure the final squash
 commit message follows the convention.
 
+The PR workflow checks every commit reachable from the PR head but not the
+base using Commitizen. Configure `cimon conventional commits` as a required
+status check in the repository's ruleset to enforce this before merging.
+
+To check commit messages locally before Git creates a commit, install the
+pre-commit hook from the checkout root:
+
+```bash
+uv run --locked pre-commit install
+```
+
+The hook uses Git's `commit-msg` stage, when the message is available. If this
+checkout previously used the old `.githooks` setup, remove that specific
+configuration first with `git config --local --unset core.hooksPath`; review
+any other custom hooks before changing their configuration. The hook runs
+outside Bazel because it is invoked by Git and uses the dev dependencies
+resolved by uv from the configured indexes. It can be bypassed with
+`git commit --no-verify`. To check existing commits locally, fetch the base
+branch and run:
+
+```bash
+uv run --locked cz check --rev-range origin/main..HEAD
+```
+
+To lint workflow files locally after installing actionlint:
+
+```bash
+actionlint
+```
+
 ### Automatic version bumps
 
 The [version-bump workflow](.github/workflows/version-bump.yml) runs after a
-push to `main`. If there is a `feat`, `fix`, or breaking change since the
-current version tag, it runs the test suite on the checked-out `main` commit,
-including the `viz` extra. Only if the tests pass does Commitizen update the
-version, lockfile and changelog and push the bump commit and `v<version>` tag
-together. Otherwise, or if there are no qualifying commits, no tag is
-created. Concurrent pushes can be included in the same bump.
+push to `main`. It first checks every commit since the current version tag
+with Commitizen, including squash commits. A validation failure stops the
+workflow without creating a tag. If there is a `feat`, `fix`, or breaking
+change, it then runs the test suite on the checked-out `main` commit, including
+the `viz` extra. Only if the tests pass does Commitizen update the version,
+lockfile and changelog and push the bump commit and `v<version>` tag together.
+If there are no qualifying commits, no tag is created. Concurrent pushes can
+be included in the same bump.
+
+If a commit message is invalid, inspect the workflow log and coordinate the
+correction with collaborators before rewriting shared `main` history. An
+authorized user must correct the affected commits after the current version
+tag and push the rewritten branch, using any necessary temporary ruleset
+bypass. Do not rewrite or move the current version tag. Verify the corrected
+range with `uv run --locked cz check --rev-range v<version>..HEAD` before
+pushing; use `git push --force-with-lease` rather than an unconditional force
+push, then restore protections and confirm the new workflow run succeeds.
+History rewriting changes commit IDs and requires collaborators to synchronize
+their branches. Check the failure output first: not every validation failure
+is caused by an invalid message.
 
 The workflow requires Actions to have `contents: write` permission and
 permission to push to `main` and create tags. A competing push can cause its

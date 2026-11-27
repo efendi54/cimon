@@ -18,7 +18,7 @@ uv run cimon query "$SCRIPT_DIR/../tests/example_specs/filter_today.yml" -i "$CI
 
 # extract merge group failures from the workflows parquet file
 uv run --extra viz cimon query \
-  --sql-file "$SCRIPT_DIR/../tests/example_specs/merge_group_failures.sql" \
+  --sql-file "$SCRIPT_DIR/../tests/example_specs/filter_merge_group_failues.sql" \
   --input "$OUT_DIR/today.parquet" \
   --output "$OUT_DIR/merge-group-failures.parquet"
 

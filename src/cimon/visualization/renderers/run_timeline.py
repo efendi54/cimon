@@ -188,6 +188,15 @@ def _timeline_figure(
         else ""
     )
     subtitle = f"Time zone {tz}; running jobs end at the cache snapshot ({snapshot:%d.%m. %H:%M})"
+    jobs = jobs.assign(waiting_time=jobs["queue_min"].map(lambda minutes: f"{minutes:.1f} min"))
+    if "job_created_at" in jobs:
+        inconsistent = _to_local(jobs["job_started_at"], "UTC") < _to_local(jobs["job_created_at"], "UTC")
+        if inconsistent.any():
+            jobs.loc[inconsistent, "waiting_time"] = "Unknown (creation timestamp is after start)"
+            subtitle += (
+                f"<br>Warning: waiting time unknown for {inconsistent.sum()} job(s): "
+                "creation timestamp is after start. Wall-clock and critical-path estimates may be affected."
+            )
     figure = px.timeline(
         _segments(jobs),
         x_start="seg_start",
@@ -198,12 +207,13 @@ def _timeline_figure(
         hover_name="job_name",
         custom_data=["job_url"],
         hover_data={
-            "queue_min": ":.1f",
+            "waiting_time": True,
             "dur_min": ":.1f",
             "job_conclusion": True,
             "stage": False,
             "seg": False,
         },
+        labels={"waiting_time": "Runner wait"},
         category_orders={"stage": order},
         title=f"{title}{link}<br><sup>{subtitle}</sup>",
     )

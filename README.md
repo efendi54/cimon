@@ -2,35 +2,46 @@
 
 Small CLI tool for tracking github action workflow runs related data.
 
-> **Note:**
->   It is usefull to have the following Visual Studio Code Extensions be installed:
->   - DuckDB Sidekick (for inspecting e.g. parquet files)
->   - Call Graph Explorer (to visualize function callings and function dependencies)
+## Prerequisites
+
+- Python 3.10 through 3.13 and [uv](https://docs.astral.sh/uv/) for the examples below.
+- For `sync`, `quota` and `runners`: `GH_HOST` (or `--host`) and a matching
+  `.netrc` / `$NETRC` entry or `GH_TOKEN` / `GITHUB_TOKEN` (or `--token`).
+- For downloading logs and extracting build metrics: the GitHub CLI `gh` and
+  credentials for the job URL's host.
+- SQL queries additionally require the optional `viz` dependency, e.g.
+  `uv run --extra viz cimon query ...`. The Plotly visualizations themselves
+  use standard dependencies.
+
+The [DuckDB Sidekick](https://marketplace.visualstudio.com/items?itemName=PrasertKana.duckdb-sidekick&utm_source=chatgpt.com)
+VS Code extension is optional and useful for inspecting Parquet files.
 
 ## Purpose
 
-`cimon` helps track and understand the health of a repository's GitHub
-Actions CI over time. Rather than clicking through the GitHub Actions UI run
-by run, it collects workflow-run and job history into a local, queryable
-cache and builds tooling on top of it:
+`cimon` helps to track a repository's GitHub Actions CI over time. Rather than clicking through the
+GitHub Actions UI run by run, it collects workflow-run and job history into a local, queryable cache
+and builds tooling on top of it:
 
 - **Caching** -- incrementally sync workflow runs and jobs from the GitHub
   API into a local Parquet cache, without re-fetching data that hasn't
   changed.
 - **Querying** -- filter that cache declaratively (Python API, YAML/JSON spec
-  files, or the `query` CLI command) to answer questions like "which jobs
+  files, SQL, or the `query` CLI command) to answer questions like "which jobs
   failed in the last week" or "which runners are currently busy".
 - **Visualizing** -- turn filtered cache data into charts (workflow-run job
-  durations, ...) through a small, pluggable rendering pipeline.
+  durations) through a small, pluggable rendering pipeline. Build metrics and
+  live runner status also have separate HTML visualizations.
 
-At a glance, the three features form one pipeline -- each stage reads the
-Parquet file the previous one wrote:
+The workflow-duration visualization filters the cache and writes both a
+Parquet subset and HTML charts. Other commands can query the cache, process
+job logs, or fetch live runner status independently:
 
 ```mermaid
 flowchart LR
     A["GitHub Actions<br>REST API"] -->|"sync"| B[("workflows.parquet<br>local cache")]
-    B -->|"query"| C[("filtered<br>Parquet")]
-    C -->|"visualize"| D["charts<br>*.html"]
+    B -->|"metrics workflow-job-durations"| C[("filtered<br>Parquet")]
+    C --> D["charts<br>*.html"]
+    B -->|"query"| E[("query result<br>Parquet")]
 ```
 
 ### Caching
@@ -47,7 +58,7 @@ flowchart LR
     A["GitHub Actions REST API"]
     A -- "runs in --from-date..--to-date<br>+ active-run scan" --> B["new / non-completed runs"]
     B -- "fetch jobs (concurrent)" --> C["job snapshots"]
-    D["completed runs already<br>cached with jobs"] -. "skipped (immutable)" .-> E
+    D["completed runs with reusable<br>cached job snapshots"] -. "reuse jobs" .-> E
     C --> E[("merge into<br>workflows.parquet")]
     D --> E
     F[("etag_cache.json")] -. "conditional requests<br>(avoid re-fetching unchanged data)" .-> A
@@ -55,15 +66,19 @@ flowchart LR
 
 To keep repeated syncs fast and light on the API quota:
 
-- **Completed runs whose jobs are already cached are treated as immutable**
-  and are not re-queried -- only new runs and still `in_progress`/`queued`
-  runs get their job list re-fetched.
+- Completed runs with terminal cached jobs, creation timestamps and a cached
+  snapshot for the current attempt are reused without re-fetching their jobs.
+  New or active runs and incomplete or outdated job snapshots are fetched.
 - An **ETag cache** (`etag_cache.json`) makes conditional GET requests, so
   unchanged pages return `304 Not Modified` instead of a full payload.
 - A separate **active-run scan** (independent of `--from-date`/`--to-date`)
-  catches runs that are still active but fell outside the requested date
-  range -- important because GitHub's API silently caps pagination at 1000
-  results on busy days.
+  discovers active runs outside the requested date range, subject to API
+  pagination limits. Cached active runs missed by both scans are also
+  reconciled individually.
+- When reconciling a previously active run returns HTTP 404, its cached active
+  workflow status is marked `unavailable` and its job data is preserved. The
+  run may have been deleted or may no longer be accessible to the credentials.
+  A later listing can refresh it if it becomes visible again.
 
 Everything above is merged into `workflows.parquet` under `--cache-dir`
 (default `~/.cache/cimon`), alongside `response.json` (a snapshot of just the
@@ -74,6 +89,10 @@ last sync request, not the cumulative cache) and `etag_cache.json`.
 ```bash
 uv run cimon sync --workflow pr.yml --from-date 2026-08-01 --to-date 2026-08-31 --cache-dir .
 ```
+
+`sync` defaults to owner `CAS`, repository `app-adas-src` and today's UTC date
+for both date boundaries; use `--owner`, `--repo`, `--from-date` and `--to-date`
+to change them.
 
 Repeat `--workflow` to sync several workflow files in one invocation:
 
@@ -112,9 +131,10 @@ Parquet cache: workflows.parquet (598.0 KB)
 
 To keep every workflow that's actually triggered on pull requests up to
 date in one go, see
-[`scripts/update_workflow_cache.sh`](scripts/update_workflow_cache.sh), which
+[`scripts/sync.sh`](scripts/sync.sh), which
 loops `cimon sync` over every workflow file referencing `pull_request`/
-`merge_group` and syncs each one from today's date.
+`merge_group` and defaults to today's date. This helper uses the hard-coded
+workspace and host in the script and waits for a keypress on exit.
 
 #### Edge case: negative `job_duration_sec`
 
@@ -122,7 +142,7 @@ For jobs that never actually ran (mostly `skipped`, occasionally
 `cancelled`), GitHub's API can report `completed_at` a few seconds *before*
 `started_at`, which would otherwise yield a negative `job_duration_sec`.
 `cimon` clamps this to `None` instead. Because "completed runs whose jobs
-are already cached are immutable" (see above), a run whose jobs were synced
+are already cached are reused" (see above), a run whose jobs were synced
 before this clamp existed keeps a stale, wrong value in
 `workflows.parquet` until that run's jobs are rebuilt from their cached
 `started_at`/`completed_at` -- which happens automatically the next time the
@@ -136,6 +156,17 @@ GitHub API, run:
 uv run cimon repair-cache --cache-dir .
 ```
 
+To remove a created-at range from a cache before re-syncing, preview it first
+with `prune-runs --dry-run`. Without `--dry-run`, matching rows are removed
+from the specified Parquet file in place:
+
+```bash
+uv run cimon prune-runs workflows.parquet --from-date 2026-08-01 --to-date 2026-08-31 --dry-run
+```
+
+`--to-date` is required; omitted `--from-date` defaults to `0001-01-01`.
+Both boundaries are inclusive and also accept ISO-8601 timestamps.
+
 #### Quota
 
 Since every sync consumes GitHub API quota, check how much is left (reads
@@ -145,6 +176,9 @@ Since every sync consumes GitHub API quota, check how much is left (reads
 ```bash
 uv run cimon quota
 ```
+
+Use `uv run cimon quota --json` for a machine-readable object with `limit`,
+`used`, `remaining` and `reset` (Unix timestamp).
 
 ```bash
 GitHub API quota:
@@ -203,8 +237,9 @@ flowchart TD
 
 Once `workflows.parquet` is populated, filter it down to answer questions
 like "which jobs failed in the last week" or "which runners are currently
-busy" -- without writing any pyarrow/DuckDB code. A filter can be expressed
-three ways, all compiling to the same `pyarrow.dataset` expressions:
+busy". Filters can be expressed as Python, YAML/JSON, or CLI spec files;
+these compile to `pyarrow.dataset` expressions. The CLI also supports a
+separate DuckDB SQL mode.
 
 ```mermaid
 flowchart LR
@@ -215,39 +250,52 @@ flowchart LR
 ```
 
 - a fluent Python builder (`WorkflowQuery`), for ad-hoc use in scripts/notebooks;
-- a declarative YAML/JSON **spec file**, for anything that needs to be
-  supplied dynamically (a CLI flag, a saved config, ...) -- and reused as-is
-  by both the `query` CLI command and `cimon metrics workflow-job-durations`
-  (see [Visualizations](#visualizations) below);
+- a declarative YAML/JSON **spec file** for a saved or dynamically supplied
+  filter;
 - the `cimon query` CLI command, which applies one or more spec files to a
-  Parquet cache and writes the filtered rows to a new Parquet file.
+  Parquet cache and writes the filtered rows to a new Parquet file. Multiple
+  specs are AND-combined.
 
 #### Example: filtering with a spec file
 
 ```yaml
 # tests/example_specs/filter_by_job_name.yml
 all:
-  - column: created_at
-    op: between
-    value: ["2026-08-01T00:00:00Z", "2026-08-31T23:59:59Z"]
   - column: job_conclusion
     op: eq
     value: success
   - column: job_name
     op: contains
-    value: "Build"
+    value: "Disk Cleanup"
+  - column: job_started_at
+    op: gt
+    value: "2026-09-18"
 ```
 
 ```bash
 uv run cimon query tests/example_specs/filter_by_job_name.yml -i workflows.parquet -o out/filtered.parquet
 ```
 
-```bash
-Wrote 128 filtered row(s) to out/filtered.parquet
+```text
+Wrote <count> filtered row(s) to out/filtered.parquet
 ```
 
 Add `-c/--column` (repeatable) to restrict the output to specific columns,
 e.g. `-c run_id -c job_name -c job_duration_sec`.
+
+#### Example: querying with SQL
+
+SQL mode requires DuckDB (the `viz` extra). The file must contain exactly
+one SELECT statement, with the input Parquet exposed as `source`:
+
+```bash
+uv run --extra viz cimon query \
+  --sql-file tests/example_specs/filter_build_workflows.sql \
+  -i workflows.parquet -o out/build-workflows.parquet
+```
+
+SQL mode cannot be combined with spec files or `--column`, and the input and
+output paths must differ.
 
 #### Example: filtering from Python
 
@@ -263,9 +311,9 @@ rows = (
 )
 ```
 
-Each row is one **job** belonging to one **run** (run-level columns like
+Each row normally represents one **job** belonging to one **run** (run-level columns like
 `run_id`/`workflow_status`/`created_at` repeat across every job row of that
-run). See
+run). A run with no cached jobs has a row with null job fields. See
 [Querying the workflows cache](docs/references/workflow-query.md) for the
 full row layout, the complete list of supported operators (`eq`, `between`,
 `contains`, `list_contains`, ...), and more `WorkflowQuery` examples.
@@ -283,15 +331,17 @@ from GitHub Actions job logs. It accepts one of three input forms:
 
 These three input forms (URL / JSON array / Parquet file) are also accepted
 by `cimon download-logs` (see [Download logs](#download-logs) below); both
-commands download each job's log the same way, so a log already downloaded
-by one command is reused by the other. Their JSON form differs though:
+commands use the same log downloader. To reuse logs between them, pass
+`download-logs`'s `OUTPUT_DIR/logs` as the `build-metrics` output directory.
+Their JSON form differs though:
 `download-logs` only needs job URLs, so it takes a plain array of URL
 strings instead of `build-metrics`' `{"job": {...}}` entries.
 
 For Parquet input, an optional `job_runner_name` column is carried into the
 runner comparison chart. The command uses `gh api`, so GitHub CLI must be
-authenticated for the URL's host (`GH_TOKEN` and `GH_HOST` can be used; a
-matching `~/.netrc` entry takes precedence over `GH_TOKEN`).
+installed. Credentials are selected for each URL's host: a matching `~/.netrc`
+(or `$NETRC`) entry takes precedence over environment tokens; otherwise `gh`'s
+saved login can be used. The same applies to `download-logs`.
 
 ```mermaid
 flowchart LR
@@ -321,11 +371,12 @@ execution on this runner). Cimon derives three ratios from these counts:
 |---|---|---|
 | `hit_rate` | `(action + remote) / (action + remote + internal + local + sandbox)` | Overall build-level cache effectiveness. **Not** a runner signal: `remote` is shared and `internal` dilutes it. |
 | `local_cache_effectiveness` | `action / (action + local + sandbox)` | Of the processes *not* covered by the shared remote cache, the share this runner's own cache already had. This is the actual runner-quality signal. |
-| `executed_share` | `(local + sandbox) / (action + remote + local + sandbox)` | Share of non-remote, non-internal processes this runner had to genuinely execute -- the direct cost of a cold local cache, and the strongest predictor of a slow build. |
+| `executed_share` | `(local + sandbox) / (action + remote + local + sandbox)` | Share of non-internal processes this runner genuinely executed; includes remote hits in the denominator. |
 
-`local_cache_effectiveness` and `executed_share` are `None` (shown as `n/a` in
-the per-build Markdown table) when there was nothing to measure, e.g. a build
-entirely resolved by the remote cache.
+`local_cache_effectiveness` is `None` (shown as `n/a` in the per-build
+Markdown table) when there are no local hits or executions, e.g. a build
+entirely resolved by the remote cache. `executed_share` is `None` only when
+there are no non-internal processes; for a remote-cache-only build it is zero.
 
 #### Example: one job
 
@@ -350,7 +401,9 @@ uv run cimon query tests/example_specs/filter_build_jobs.yml \
 uv run cimon metrics build-metrics build_jobs.parquet out/build-metrics
 ```
 
-The output is organized by workflow run and job ID:
+For non-empty Parquet or JSON input, the output is organized by workflow run
+and job ID with aggregate charts at the output root. Missing runner names are
+grouped as `(unknown)`:
 
 ```text
 out/build-metrics/
@@ -383,13 +436,15 @@ out/build-metrics/
 Use the same output directory on repeated calls to avoid downloading logs
 again. Existing non-empty logs are reused, while new downloads are first
 written to a temporary `.log.part` file and only moved into place after a
-successful download. JSON, Markdown, and aggregate HTML files are regenerated
-from the cached logs. If no output directory is given, it defaults to `/tmp`.
+successful download. JSON and Markdown are regenerated from the cached logs;
+Parquet or JSON input also generates aggregate HTML. A single URL does not
+generate aggregate charts. If no output directory is given, it defaults to
+`/tmp`.
 
 ### Download logs
 
 `cimon download-logs` downloads job log(s) into
-`OUTPUT_DIR/<run_id>/<job_id>.log`, accepting the same three input forms as
+`OUTPUT_DIR/logs/<run_id>/<job_id>.log`, accepting the same three input forms as
 `cimon metrics build-metrics` (a job URL, a JSON array, or a Parquet file with a
 `job_url` column) and reusing the same download routine, including skipping
 already-downloaded, non-empty logs:
@@ -410,8 +465,10 @@ The JSON array form is simply a list of job-url strings:
 Pass `-p/--pattern` (a regular expression) to additionally keep only the
 jobs whose downloaded log matches it, writing those to `log-match.parquet`
 in `OUTPUT_DIR` (keeping all original columns for Parquet input; URL/JSON
-input only produces a `job_url` column). Without `--pattern`, logs are
-simply downloaded and no output file is written:
+input only produces a `job_url` column). If nothing matches, a warning is
+logged and no new result file is written; an existing result file is not
+removed. Without `--pattern`, logs are simply downloaded and no result file
+is written:
 
 ```bash
 uv run cimon download-logs -i build_jobs.parquet -p "ERROR:" -o out/logs
@@ -423,6 +480,20 @@ skip logs it already downloaded without consuming GitHub API quota again.
 Pass `--clear-logs` together with `-p/--pattern` to delete the logs of
 non-matching jobs again once the analysis is done, keeping only the logs of
 matching jobs on disk.
+
+### Runner status
+
+`cimon runners` fetches live self-hosted runner status for an organization or
+repository and prints online/offline and busy counts. Each call also appends a
+snapshot to `runner_status.parquet` and writes a timestamped JSON snapshot
+under `runner_status_snapshots/` in `--cache-dir` (default `~/.cache/cimon`).
+Optionally, `-o` writes an HTML treemap of runner labels and names by status:
+
+```bash
+mkdir -p out
+uv run cimon runners --org CAS -o out/runner-status.html
+# Or use --owner CAS --repo app-adas-src instead of --org.
+```
 
 ### Visualizations
 
@@ -449,11 +520,15 @@ Each visualization is registered under a short name in
 `cimon metrics` subcommand:
 
 ```bash
-uv run cimon metrics workflow-job-durations -i workflows.parquet -o out/visualizations -p run-url=<URL>
+uv run cimon metrics workflow-job-durations -i workflows.parquet -o out/visualizations -p 'run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>'
 ```
 
 Pandas and Plotly are standard dependencies, required by both `cimon metrics build-metrics` and
 `cimon metrics workflow-job-durations`.
+
+The historical [`scripts/visualize.sh`](scripts/visualize.sh) invokes
+`cimon visualize` and `cimon runner-status-trend`, which are not current CLI
+commands. Use the commands documented here instead.
 
 Currently registered:
 
@@ -479,7 +554,7 @@ flowchart LR
 
 **1. Write a filter spec** -- a YAML file describing which rows to keep (see
 [Querying the workflows cache](docs/references/workflow-query.md) for the
-full spec syntax):
+full spec syntax). Create the `specs` directory if it does not exist:
 
 ```yaml
 # src/cimon/visualization/specs/example_viz.yml
@@ -548,9 +623,9 @@ single workflow run. It takes a workflow-run URL (as copied from the browser) vi
 from the cache (default `~/.cache/cimon/workflows.parquet`, or `-i`) and writes one HTML page:
 
 ```bash
-uv run cimon metrics workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>
+uv run cimon metrics workflow-job-durations -p 'run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>'
 # a specific attempt:
-uv run cimon metrics workflow-job-durations -p run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>/attempts/2
+uv run cimon metrics workflow-job-durations -p 'run-url=https://<host>/<owner>/<repo>/actions/runs/<run_id>/attempts/2'
 ```
 
 The run has to be in the cache (see `cimon sync`); without `/attempts/<n>` the latest cached attempt is used.
@@ -570,6 +645,9 @@ the URL) is built in code by `spec_for_run` in the renderer module. The filtered
 
 Waiting times need `job_created_at` in the cache. Runs cached before that column existed show no waiting time until
 `cimon sync` refetches them (it does so once, for runs inside the synced `--from-date`/`--to-date` range).
+If a job's creation timestamp is after its start, the timeline warns and labels its runner wait as unknown in the
+job hover text. Its execution bar remains visible if it has an execution interval. Wall-clock and critical-path
+estimates for the attempt may be affected; the cache is not changed.
 
 The same tables are logged on the console. Skipped jobs are left out. Further parameters: `-p tz=<zone>` (default
 `Europe/Berlin`) and `-p gap=<seconds>` (tolerance for the critical path, default 120). The renderer lives in

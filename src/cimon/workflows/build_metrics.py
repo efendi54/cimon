@@ -1,7 +1,6 @@
 """Script for retrieving and processing build metrics towards github workflow jobs that initiated bazel builds.
 
-- Dependency: gh (GitHub CLI) must be installed and authenticated with a token that has access to the repository via
-  the GH_TOKEN environment variable.
+- Dependency: gh (GitHub CLI) must be installed and authenticated for the repository's host.
 
 - Usage:
     python build_metrics.py <workflow-job-url> [output-dir]
@@ -94,13 +93,37 @@ def extract(body: str, key: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def github_cli_environment(host: str) -> dict[str, str]:
+    """Prepare host-specific credentials for a gh subprocess without changing the parent environment."""
+    env = os.environ.copy()
+    token_var = (
+        "GH_TOKEN" if host == "github.com" or host.endswith(".ghe.com")
+        else "GH_ENTERPRISE_TOKEN"
+    )
+    env_token = (
+        env.get(token_var)
+        or (env.get("GITHUB_ENTERPRISE_TOKEN") if token_var == "GH_ENTERPRISE_TOKEN" else None)
+        or env.get("GH_TOKEN")
+        or env.get("GITHUB_TOKEN")
+    )
+    if token := resolve_token(host, env_token):
+        env[token_var] = token
+    env["GH_HOST"] = host
+    return env
+
+
 def ensure_github_auth(host: str) -> None:
-    # `gh` prefers GH_TOKEN over its own stored login, so a ~/.netrc entry wins by exporting it.
-    if token := resolve_token(host, os.environ.get("GH_TOKEN")):
-        os.environ["GH_TOKEN"] = token
+    env = github_cli_environment(host)
+    token_var = (
+        "GH_TOKEN" if host == "github.com" or host.endswith(".ghe.com")
+        else "GH_ENTERPRISE_TOKEN"
+    )
+    if env.get(token_var):
+        return
 
     result = subprocess.run(
         ["gh", "auth", "status", "--hostname", host],
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -109,15 +132,9 @@ def ensure_github_auth(host: str) -> None:
     if result.returncode == 0:
         return
 
-    token = os.environ.get("GH_TOKEN")
-    if not token:
-        raise RuntimeError("Missing GH_TOKEN")
-
-    subprocess.run(
-        ["gh", "auth", "login", "--hostname", host, "--with-token"],
-        input=token,
-        text=True,
-        check=True,
+    raise RuntimeError(
+        f"No credentials for {host}: add a matching .netrc entry, set a GitHub token, "
+        "or authenticate with gh.",
     )
 
 
@@ -138,6 +155,7 @@ def get_job_info(
         capture_output=True,
         text=True,
         check=True,
+        env=github_cli_environment(host),
     )
 
     job = json.loads(result.stdout)
@@ -248,6 +266,7 @@ def download_job_log(
                 ],
                 stdout=f,
                 check=True,
+                env=github_cli_environment(host),
             )
         partial_logfile.replace(logfile)
     finally:
@@ -276,6 +295,7 @@ def download_build_profiles_if_exists(
         capture_output=True,
         text=True,
         check=True,
+        env=github_cli_environment(host),
     )
 
     artifacts = json.loads(result.stdout).get("artifacts", [])
@@ -303,6 +323,7 @@ def download_build_profiles_if_exists(
             str(target),
         ],
         check=True,
+        env=github_cli_environment(host),
     )
 
     print(f"Downloaded artifact to {target}")

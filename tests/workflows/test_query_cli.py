@@ -130,7 +130,7 @@ def test_query_sql_writes_aggregated_parquet(tmp_path: Path) -> None:
         ]),
         tmp_path / "workflows.parquet",
     )
-    sql = (Path(__file__).parents[1] / "example_specs" / "merge_group_failures.sql").read_text(
+    sql = (Path(__file__).parents[1] / "example_specs" / "filter_merge_group_failues.sql").read_text(
         encoding="utf-8",
     )
 
@@ -140,7 +140,7 @@ def test_query_sql_writes_aggregated_parquet(tmp_path: Path) -> None:
     table = pq.read_table(tmp_path / "result.parquet")
     assert table.column_names == ["job_name", "failure_count", "avg_duration_sec"]
     assert table.to_pylist() == [
-        {"job_name": "build", "failure_count": 2, "avg_duration_sec": 12.35},
+        {"job_name": "build", "failure_count": 3, "avg_duration_sec": 12.35},
         {"job_name": "test", "failure_count": 1, "avg_duration_sec": 20.0},
     ]
 

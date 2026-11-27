@@ -39,15 +39,17 @@ if [ $# -ge 2 ]; then
   export TO_DATE="$2"
 fi
 
-#for wf in "${wf_files[@]}"; do
-#  if ! uv run cimon sync --cache-dir "$CIMON_CACHE_DIR" --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"; then
-#    rc=$?
-#    echo "cimon sync failed for workflow '$wf' (exit code $rc, likely quota limit reached). Stopping sync." >&2
-#    break
-#  fi
-#done
+for wf in "${wf_files[@]}"; do
+  if uv run cimon sync --cache-dir "$CIMON_CACHE_DIR" --workflow "$wf" --from-date "$FROM_DATE" --to-date "$TO_DATE"; then
+    :
+  else
+    rc=$?
+    echo "cimon sync failed for workflow '$wf' (exit code $rc). Stopping sync." >&2
+    break
+  fi
+done
 
-"$SCRIPT_DIR/filter_merge_queue_failures.sh"
+# "$SCRIPT_DIR/filter_merge_queue_failures.sh"
 
 
 popd >/dev/null

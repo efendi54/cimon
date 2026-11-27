@@ -131,6 +131,7 @@ def test_visualize_defaults_to_latest_attempt(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     html = (tmp_path / "out" / "run-100-attempt-2.html").read_text(encoding="utf-8")
     assert "Build" in html
+    assert "waiting time unknown" not in html
     assert "Test A" not in html
     assert (
         pq.read_table(tmp_path / "out" / "workflow-job-durations.parquet").num_rows == 6
@@ -155,6 +156,34 @@ def test_visualize_with_attempt_in_url_plots_running_and_skips_skipped(
         "/", "\\u002f"
     )
     assert f'href=\\"{run_url}\\"' in html
+
+
+def test_visualize_marks_inconsistent_creation_time(tmp_path: Path) -> None:
+    """Warn on reversed timestamps without dropping the running bar or marking zero waits as unknown."""
+    invalid = _job(
+        "Build / delayed timestamp",
+        "2026-11-05T08:00:00Z",
+        "2026-11-05T08:10:00Z",
+        created="2026-11-05T08:20:00Z",
+        attempt=2,
+    )
+    zero_wait = _job(
+        "Build / no wait",
+        "2026-11-05T08:00:00Z",
+        "2026-11-05T08:20:00Z",
+        created="2026-11-05T08:00:00Z",
+        attempt=2,
+    )
+    _write_cache(tmp_path / "cache", [invalid, zero_wait])
+
+    result = _visualize(tmp_path, "-p", f"run-url={RUN_URL}/attempts/2")
+
+    assert result.exit_code == 0, result.output
+    report = (tmp_path / "out" / "run-100-attempt-2.html").read_text(encoding="utf-8")
+    assert "Warning: waiting time unknown for 1 job(s)" in report
+    assert '"Unknown (creation timestamp is after start)"' in report
+    assert '"0.0 min"' in report
+    assert r'"Build \u002f delayed timestamp"' in report
 
 
 def test_visualize_unknown_run_fails(tmp_path: Path) -> None:

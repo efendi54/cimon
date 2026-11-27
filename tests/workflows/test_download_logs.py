@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from typing import TYPE_CHECKING
 
 import pyarrow as pa
@@ -107,6 +108,38 @@ def test_run_accepts_single_job_url(
     assert output_path == output_dir / download_logs.LOG_MATCH_PARQUET_FILE_NAME
     table = pq.read_table(output_path)
     assert table.column("job_url").to_pylist() == [job_url]
+
+
+@pytest.mark.parametrize(
+    ("host", "token_var"),
+    [("tenant.ghe.com", "GH_TOKEN"), ("ghe.example", "GH_ENTERPRISE_TOKEN")],
+)
+def test_run_uses_host_netrc_for_gh_without_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, token_var: str,
+) -> None:
+    netrc = tmp_path / ".netrc"
+    netrc.write_text(f"machine {host} login user password netrc-secret\n")
+    netrc.chmod(0o600)
+    monkeypatch.setenv("NETRC", str(netrc))
+    monkeypatch.setenv("GH_TOKEN", "other-token")
+    monkeypatch.delenv("GH_ENTERPRISE_TOKEN", raising=False)
+    calls = []
+
+    def run_gh(args, **kwargs):
+        calls.append(args)
+        assert kwargs["env"][token_var] == "netrc-secret"
+        assert kwargs["env"]["GH_HOST"] == host
+        kwargs["stdout"].write(b"log contents\n")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(build_metrics.subprocess, "run", run_gh)
+    url = f"https://{host}/acme/app/actions/runs/100/job/1"
+    download_logs.run(url, tmp_path / "out")
+
+    assert len(calls) == 1
+    assert calls[0][1] == "api"
+    assert (tmp_path / "out" / "logs" / "100" / "1.log").read_text() == "log contents\n"
+    assert build_metrics.os.environ["GH_TOKEN"] == "other-token"
 
 
 def test_run_accepts_json_array_of_urls(

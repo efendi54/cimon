@@ -267,11 +267,11 @@ The input Parquet is available as `source`. The result, with the columns and row
 returned by the query, is written atomically to a separate Parquet file.
 
 ```bash
-uv run --extra viz cimon query --sql-file tests/example_specs/merge_group_failures.sql \
+uv run --extra viz cimon query --sql-file tests/example_specs/filter_merge_group_failues.sql \
   --input workflows.parquet --output out/merge-group-failures.parquet
 ```
 
-The [example query](../../tests/example_specs/merge_group_failures.sql) counts
+The [example query](../../tests/example_specs/filter_merge_group_failues.sql) counts
 failed merge-group jobs per job name, calculates their average duration, and
 sorts by failure count. The SQL mode uses DuckDB from the `viz` extra and
 cannot be combined with spec files or `--column`. Reading other files or URLs

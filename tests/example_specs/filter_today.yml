@@ -1,5 +1,5 @@
 # "today"/"today_end" resolve to actual dates at build time (see
 # cimon.workflows.query_spec), so this never needs manual edits.
-column: job_created_at
+column: job_started_at
 op: between
 value: ["today", "today_end"]

@@ -796,7 +796,11 @@ def cached_attempt_has_job_snapshot(
     return not job_attempts or run_attempt in job_attempts
 
 
-def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
+def merge_parquet_cache(
+    path: str,
+    request_data: WorkflowCache,
+    unavailable_run_ids: set[str] | None = None,
+) -> None:
     """Replace runs in the persistent Parquet cache with the JSON snapshot."""
     current_rows = cache_to_parquet_rows(request_data)
     request_run_ids = {
@@ -805,6 +809,18 @@ def merge_parquet_cache(path: str, request_data: WorkflowCache) -> None:
     existing_rows = [
         row for row in load_parquet(path) if row.get("run_id") not in request_run_ids
     ]
+    if unavailable_run_ids and request_data.workflow:
+        workflow = request_data.workflow
+        for row in existing_rows:
+            if (
+                row.get("run_id") in unavailable_run_ids
+                and row.get("workflow_id") == str(workflow.id)
+                and row.get("owner") == workflow.owner
+                and row.get("repo") == workflow.repo
+                and row.get("host") == workflow.host
+                and row.get("workflow_status") in ACTIVE_RUN_STATUSES
+            ):
+                row["workflow_status"] = "unavailable"
     save_parquet(path, existing_rows + current_rows)
 
 
@@ -1425,9 +1441,13 @@ def sync_workflow(  # noqa: C901, PLR0912, PLR0915
         row
         for row in existing_parquet_rows
         if row.get("workflow_id") == own_workflow_id
+        and row.get("owner") == args.owner
+        and row.get("repo") == args.repo
+        and row.get("host") == host
     ]
     stale_active_run_ids = find_stale_active_run_ids(own_parquet_rows, known_run_ids)
 
+    unavailable_run_ids: set[str] = set()
     if quota_exceeded is None and stale_active_run_ids:
         logger.info(
             f"Reconciling {len(stale_active_run_ids)} run(s) cached as "
@@ -1446,6 +1466,16 @@ def sync_workflow(  # noqa: C901, PLR0912, PLR0915
             except QuotaLimitReachedError as exc:
                 quota_exceeded = exc
                 break
+            except requests.HTTPError as exc:
+                if exc.response is None or exc.response.status_code != HTTP_NOT_FOUND:
+                    raise
+                logger.warning(
+                    "Cached workflow run %s is unavailable (HTTP 404; deleted or inaccessible); "
+                    "preserving its cached data",
+                    run_id,
+                )
+                unavailable_run_ids.add(run_id)
+                continue
             runs.append(run)
             known_run_ids.add(run_id)
 
@@ -1616,7 +1646,7 @@ def sync_workflow(  # noqa: C901, PLR0912, PLR0915
     cache.updated_at = now_iso()
 
     save_cache(response_file, cache)
-    merge_parquet_cache(str(parquet_file), cache)
+    merge_parquet_cache(str(parquet_file), cache, unavailable_run_ids)
     save_etag_cache(etag_cache_file, etag_cache)
 
     # ------------------------------------------------------------------

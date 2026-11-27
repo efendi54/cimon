@@ -84,11 +84,11 @@ def netrc_token(host: str) -> str | None:
 @functools.cache
 def _log_credential_source(host: str, *, from_netrc: bool, has_env_token: bool) -> None:
     if from_netrc:
-        overrides = " (overrides GH_TOKEN/GITHUB_TOKEN)" if has_env_token else ""
+        overrides = " (overrides environment token)" if has_env_token else ""
         logger.info(f"Credentials for {host}: from .netrc{overrides}")
     elif has_env_token:
         logger.info(
-            f"Credentials for {host}: from GH_TOKEN/GITHUB_TOKEN (no matching .netrc entry)"
+            f"Credentials for {host}: from environment token (no matching .netrc entry)"
         )
 
 

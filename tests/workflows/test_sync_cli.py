@@ -215,3 +215,68 @@ def test_sync_cli_requires_workflow_before_accessing_api(tmp_path, sync_api) -> 
     assert result.exit_code == 2
     assert "No workflow specified" in result.output
     sync_api["quota"].assert_not_called()
+
+
+def test_sync_marks_missing_stale_run_unavailable_and_preserves_jobs(
+    tmp_path, sync_api, mocker,
+) -> None:
+    sync_api["runs"][1]["status"] = "in_progress"
+    sync_api["runs"][1]["conclusion"] = None
+    args = sync_args(tmp_path, ["cas_nightly_and_release.yml", "pr.yml"])
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, (result.output, result.exception)
+
+    sync_api["fetch"].side_effect = lambda *args, **_kwargs: iter(
+        [] if args[4] == 1 else [sync_api["runs"][args[4]]],
+    )
+    response = requests.Response()
+    response.status_code = 404
+    fetch_run = mocker.patch(
+        "cimon.workflows.synch.fetch_run",
+        side_effect=requests.HTTPError(response=response),
+    )
+
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, (result.output, result.exception)
+    rows = synch.load_parquet(str(tmp_path / "workflows.parquet"))
+    rows_by_run = {row["run_id"]: row for row in rows}
+    assert rows_by_run["100"]["workflow_status"] == "unavailable"
+    assert rows_by_run["100"]["job_id"] == "101"
+    assert rows_by_run["200"]["workflow_status"] == "completed"
+    assert "Cached workflow run 100 is unavailable" in (tmp_path / "cimon.log").read_text()
+
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, (result.output, result.exception)
+    fetch_run.assert_called_once()
+
+    sync_api["runs"][1]["status"] = "completed"
+    sync_api["runs"][1]["conclusion"] = "success"
+    sync_api["fetch"].side_effect = lambda *args, **_kwargs: iter(
+        [sync_api["runs"][args[4]]],
+    )
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, (result.output, result.exception)
+    rows = synch.load_parquet(str(tmp_path / "workflows.parquet"))
+    assert {row["run_id"]: row["workflow_status"] for row in rows}["100"] == "completed"
+
+
+@pytest.mark.parametrize("status", [403, 500, None])
+def test_sync_propagates_other_stale_run_errors(tmp_path, sync_api, mocker, status) -> None:
+    sync_api["runs"][1]["status"] = "queued"
+    args = sync_args(tmp_path, ["cas_nightly_and_release.yml"])
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, (result.output, result.exception)
+    sync_api["fetch"].side_effect = lambda *args, **kwargs: iter([])
+    response = requests.Response() if status is not None else None
+    if response is not None:
+        response.status_code = status
+    mocker.patch(
+        "cimon.workflows.synch.fetch_run",
+        side_effect=requests.HTTPError(response=response),
+    )
+
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, requests.HTTPError)
+    [row] = synch.load_parquet(str(tmp_path / "workflows.parquet"))
+    assert row["workflow_status"] == "queued"

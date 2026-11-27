@@ -1,3 +1,9 @@
+## v0.5.0 (2026-11-27)
+
+### Feat
+
+- introduce badges + ruff checking (#4)
+
 ## v0.4.0 (2026-11-27)
 
 ### Feat

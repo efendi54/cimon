@@ -1,3 +1,9 @@
+## v0.5.1 (2026-11-27)
+
+### Fix
+
+- use correct versions to get rid of node-js related warnings in ci (#6)
+
 ## v0.5.0 (2026-11-27)
 
 ### Feat

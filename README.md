@@ -19,6 +19,12 @@ and [pre-commit](https://pre-commit.com/) are included in the uv `dev` group.
 installed tool for checking GitHub Actions workflows locally; it is not a
 Python dependency.
 
+For development, [Commitizen](https://commitizen-tools.github.io/commitizen/)
+and [pre-commit](https://pre-commit.com/) are included in the uv `dev` group.
+[actionlint](https://github.com/rhysd/actionlint) is an optional, separately
+installed tool for checking GitHub Actions workflows locally; it is not a
+Python dependency.
+
 The [DuckDB Sidekick](https://marketplace.visualstudio.com/items?itemName=PrasertKana.duckdb-sidekick&utm_source=chatgpt.com)
 VS Code extension is optional and useful for inspecting Parquet files.
 
@@ -117,10 +123,24 @@ History rewriting changes commit IDs and requires collaborators to synchronize
 their branches. Check the failure output first: not every validation failure
 is caused by an invalid message.
 
-The workflow requires Actions to have `contents: write` permission and
-permission to push to `main` and create tags. A competing push can cause its
-atomic push to fail; a later workflow run processes the updated `main`.
-It does not create a GitHub Release.
+The workflow uses a GitHub App installation token to push the bump commit and
+tag. To configure it:
+
+1. Create a GitHub App with repository **Contents: read and write** permission,
+   install it only on this repository, and generate a private key.
+2. Add the App ID as the repository Actions variable `CIMON_BUMP_APP_ID` and
+   the complete private key as the Actions secret `CIMON_BUMP_APP_PRIVATE_KEY`.
+   Keep the private key out of the repository and chat.
+3. Add the app to the bypass list of every applicable `main` ruleset with
+   direct-push bypass permission. Also allow it through any applicable branch
+   protection and tag rules. This grants the app the ability to bypass those
+   protections, so limit access to its private key.
+
+The workflow creates a repository-scoped token only after the tests pass.
+A competing push can cause the atomic push to fail; a later workflow run
+processes the updated `main`. The App push triggers another workflow run,
+which sees the current commit is already tagged and does nothing. No GitHub
+Release is created.
 
 ### Creating a pull request
 

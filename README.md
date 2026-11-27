@@ -93,6 +93,20 @@ To lint workflow files locally after installing actionlint:
 actionlint
 ```
 
+### Commit convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) for commit
+messages, for example `feat: add metrics export` or `fix: handle missing jobs`.
+Mark breaking changes with `!`, for example `feat!: change output format`, or
+with a `BREAKING CHANGE:` footer. Commitizen uses these messages to determine
+version changes and generate changelog entries; changes without a recognized
+conventional message may not be reflected in the version or changelog.
+
+The automatic workflow starts a bump only when it finds a `feat`, `fix`, or
+breaking change since the current version tag. Other types such as `docs` or
+`refactor` alone do not trigger it. For squash merges, ensure the final squash
+commit message follows the convention.
+
 ### Automatic version bumps
 
 The [version-bump workflow](.github/workflows/version-bump.yml) runs after a

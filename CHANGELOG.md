@@ -1,3 +1,13 @@
+## v0.4.0 (2026-11-27)
+
+### Feat
+
+- adapt version-bumping to check for conventional commit  (#2)
+
+### Fix
+
+- version bumping uses github app for bumping (due to ruleset preventing pushes to main) (#3)
+
 ## v0.3.0 (2026-11-27)
 
 ### Feat

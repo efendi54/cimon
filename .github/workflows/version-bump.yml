@@ -54,6 +54,11 @@ jobs:
             exit 0
           fi
 
+          if ! uv run --locked --only-group dev cz check --rev-range "${current_tag}..HEAD"; then
+            echo "::error::Commit validation failed for ${current_tag}..HEAD. Check the output above; invalid commit messages must be corrected before version bumping."
+            exit 1
+          fi
+
           messages="$(git log --format=%B "${current_tag}..HEAD")"
           if grep -E '^((feat|fix)(\(.+\))?!?|[[:alnum:]_]+(\(.+\))?!|BREAKING[ -]CHANGE):' <<< "$messages" >/dev/null; then
             echo "bump=true" >> "$GITHUB_OUTPUT"

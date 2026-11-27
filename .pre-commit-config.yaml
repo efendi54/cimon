@@ -1,0 +1,11 @@
+default_install_hook_types: [commit-msg]
+
+repos:
+  - repo: local
+    hooks:
+      - id: conventional-commit
+        name: Check Conventional Commit message
+        entry: uv run --locked cz check --allow-abort --commit-msg-file
+        language: system
+        stages: [commit-msg]
+        always_run: true

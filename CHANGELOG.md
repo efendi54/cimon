@@ -1,3 +1,11 @@
+## v0.3.0 (2026-11-27)
+
+### Feat
+
+- merge pull request #1 from efendi54/feature/introduce-version-bump-workflow
+- introduce PR creation template + description
+- introduce new workflow for version bumping (gets active when pushing to main)
+
 ## v0.2.0 (2026-11-27)
 
 ### Feat

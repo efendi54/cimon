@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "cimon"
-version = "0.2.0"
+version = "0.3.0"
 description = "A ci monitoring tool"
 readme = "README.md"
 license = { text = "MIT" }
